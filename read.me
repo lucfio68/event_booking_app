@@ -1,0 +1,59 @@
+# Clona/crea la cartella progetto
+cd ../event_booking_app
+
+#modifica policy per Powersghell solo
+(Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process)
+# Crea virtual environment
+python -m venv venv
+
+# Attiva (Windows)
+cmd /c venv\Scripts\activate.bat (powershell) ---venv\Scripts\activate
+# Attiva (Linux/Mac)
+source venv/bin/activate
+
+# Installa dipendenze
+pip install -r requirements.txt
+
+# Crea file .env
+cp .env.example .env
+# Modifica .env con la tua connection string Neon
+
+# Imposta variabili ambiente
+$env:DATABASE_URL="postgresql://neondb_owner:npg_MCjq4FePlg1Q@ep-plain-moon-asgncf72-pooler.c-4.eu-central-1.aws.neon.tech/event_booking?sslmode=require&channel_binding=require"
+ (PowerShell)
+
+python app.py
+
+# Inizializza tabelle e dati demo
+http://localhost:5000/init-db	
+
+Apri il browser su http://localhost:5000
+
+
+[salva su git hub : https://github.com/lucfio68/event_booking_app
+
+inpowershell:
+
+cd c:\Project\event_booking_app
+
+.. or create a new repository on the command line
+
+echo "# event_booking_app" >> README.md
+git init
+git add .
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/lucfio68/event_booking_app.git
+git push -u origin main
+
+(git add .
+git commit -m "descrizione modifiche"
+git push)
+
+…or push an existing repository from the command line
+git remote add origin https://github.com/lucfio68/event_booking_app.git
+git branch -M main
+git push -u origin main
+
+$env:FLASK_ENV="development"
+python app.py

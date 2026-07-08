@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}Gestione Evento - {{ evento.nome }}{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <h2>Gestione Evento: {{ evento.nome }}</h2>
+    <p><strong>Data:</strong> {{ evento.data_evento.strftime('%d/%m/%Y') }} | <strong>Sala:</strong> {{ evento.sala.nome }}</p>
+
+    <div class="search-box">
+        <form method="GET" action="{{ url_for('admin_event_view', event_id=evento.id) }}">
+            <input type="text" name="search" value="{{ search }}" placeholder="Cerca per nome o email..." class="form-control">
+            <button type="submit" class="btn btn-primary">Cerca</button>
+            <a href="{{ url_for('admin_event_view', event_id=evento.id) }}" class="btn btn-secondary">Reset</a>
+        </form>
+    </div>
+
+    <div class="seats-layout-admin">
+        <h3>Layout Sala</h3>
+        <div id="adminSeatsContainer" class="seats-container">
+            <p>Caricamento posti...</p>
+        </div>
+    </div>
+
+    <div class="prenotazioni-list">
+        <h3>Prenotazioni ({{ prenotazioni|length }})</h3>
+        {% if prenotazioni %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Utente</th>
+                    <th>Email</th>
+                    <th>Data Prenotazione</th>
+                    <th>Posti</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in prenotazioni %}
+                <tr>
+                    <td>{{ p.id }}</td>
+                    <td>{{ p.utente.nome_cognome }}</td>
+                    <td>{{ p.utente.email }}</td>
+                    <td>{{ p.data_prenotazione.strftime('%d/%m/%Y %H:%M') }}</td>
+                    <td>{{ p.posti|length }}</td>
+                    <td><button class="btn btn-sm btn-info" onclick="viewPrenotazione({{ p.id }})">Dettagli</button></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>Nessuna prenotazione trovata.</p>
+        {% endif %}
+    </div>
+
+    <a href="{{ url_for('calendar_view') }}" class="btn btn-outline">Torna al Calendario</a>
+</div>
+
+<!-- Modal Dettagli Prenotazione -->
+<div id="prenotazioneModal" class="modal" style="display:none;">
+    <div class="modal-content">
+        <span class="close-modal" onclick="closeModal()">&times;</span>
+        <h3>Dettagli Prenotazione</h3>
+        <div id="prenotazioneDetails"></div>
+    </div>
+</div>
+
+<script>
+(function() {
+    var EVENT_ID = {{ evento.id }};
+
+    function loadSeats() {
+        var container = document.getElementById('adminSeatsContainer');
+        if (!container) return;
+        container.innerHTML = '<p>Caricamento posti...</p>';
+
+        fetch('/api/seats/' + EVENT_ID)
+            .then(function(resp) {
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                return resp.json();
+            })
+            .then(function(seatsData) {
+                if (window.SeatRenderer) {
+                    SeatRenderer.render('adminSeatsContainer', seatsData, {
+                        isAdmin: true,
+                        onSeatClick: function(seat) {
+                            if (seat.prenotazione_id) {
+                                viewPrenotazione(seat.prenotazione_id);
+                            }
+                        }
+                    });
+                } else {
+                    renderFallback(seatsData);
+                }
+            })
+            .catch(function(e) {
+                container.innerHTML = '<p class="text-danger">Errore caricamento posti.</p>';
+            });
+    }
+
+    function renderFallback(seatsData) {
+        var container = document.getElementById('adminSeatsContainer');
+        container.innerHTML = '';
+        if (!seatsData.length) {
+            container.innerHTML = '<p style="text-align:center;padding:20px;color:#7f8c8d;">Nessun posto trovato.</p>';
+            return;
+        }
+        var maxCol = 0;
+        for (var i = 0; i < seatsData.length; i++) {
+            if (seatsData[i].colonna > maxCol) maxCol = seatsData[i].colonna;
+        }
+        var headerRow = document.createElement('div');
+        headerRow.className = 'seat-row';
+        headerRow.innerHTML = '<div class="row-label"></div>';
+        for (var c = 1; c <= maxCol; c++) {
+            headerRow.innerHTML += '<div class="seat col-label">' + c + '</div>';
+        }
+        container.appendChild(headerRow);
+
+        var rows = {};
+        for (var j = 0; j < seatsData.length; j++) {
+            var s = seatsData[j];
+            if (!rows[s.fila]) rows[s.fila] = [];
+            rows[s.fila].push(s);
+        }
+
+        var filaKeys = Object.keys(rows).sort();
+        for (var f = 0; f < filaKeys.length; f++) {
+            var fila = filaKeys[f];
+            var rowDiv = document.createElement('div');
+            rowDiv.className = 'seat-row';
+            rowDiv.innerHTML = '<div class="row-label">' + fila + '</div>';
+
+            rows[fila].sort(function(a, b) { return a.colonna - b.colonna; });
+            for (var k = 0; k < rows[fila].length; k++) {
+                var seat = rows[fila][k];
+                var seatDiv = document.createElement('div');
+                var classes = ['seat', seat.stato];
+                if (seat.utente) classes.push('admin-name');
+
+                seatDiv.className = classes.join(' ');
+                seatDiv.textContent = seat.utente ? seat.utente.substring(0, 6) : seat.colonna;
+                seatDiv.title = seat.utente 
+                    ? 'Fila ' + seat.fila + ' Col ' + seat.colonna + ' - ' + seat.utente
+                    : 'Fila ' + seat.fila + ' Col ' + seat.colonna + ' - Libero';
+
+                if (seat.prenotazione_id) {
+                    seatDiv.style.cursor = 'pointer';
+                    (function(pid) {
+                        seatDiv.addEventListener('click', function() { viewPrenotazione(pid); });
+                    })(seat.prenotazione_id);
+                }
+                rowDiv.appendChild(seatDiv);
+            }
+            container.appendChild(rowDiv);
+        }
+    }
+
+    loadSeats();
+})();
+
+function viewPrenotazione(id) {
+    fetch('/api/prenotazione/' + id)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var modal = document.getElementById('prenotazioneModal');
+            var details = document.getElementById('prenotazioneDetails');
+
+            var postiStr = '';
+            for (var i = 0; i < data.posti.length; i++) {
+                if (i > 0) postiStr += ', ';
+                postiStr += data.posti[i].fila + data.posti[i].colonna;
+            }
+
+            details.innerHTML = 
+                '<p><strong>ID Prenotazione:</strong> ' + data.id + '</p>' +
+                '<p><strong>Utente:</strong> ' + data.utente.nome + '</p>' +
+                '<p><strong>Email:</strong> ' + data.utente.email + '</p>' +
+                '<p><strong>Cellulare:</strong> ' + (data.utente.cellulare || 'N/D') + '</p>' +
+                '<p><strong>Data Prenotazione:</strong> ' + data.data_prenotazione + '</p>' +
+                '<p><strong>Stato:</strong> ' + data.stato + '</p>' +
+                '<p><strong>Posti:</strong> ' + postiStr + '</p>';
+
+            modal.style.display = 'flex';
+        })
+        .catch(function(e) { alert('Errore caricamento dettagli'); });
+}
+
+function closeModal() {
+    document.getElementById('prenotazioneModal').style.display = 'none';
+}
+</script>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Calendario Eventi{% endblock %}
+{% block content %}
+<div class="calendar-container">
+    <!-- Selezione Anno -->
+    <div class="year-selector">
+        <button id="prevYear" class="btn-arrow">◀</button>
+        <h2 id="currentYear"></h2>
+        <button id="nextYear" class="btn-arrow">▶</button>
+    </div>
+
+    <!-- Selezione Mese -->
+    <div class="month-selector">
+        <button id="prevMonth" class="btn-arrow">◀</button>
+        <h3 id="currentMonth"></h3>
+        <button id="nextMonth" class="btn-arrow">▶</button>
+    </div>
+
+    <!-- Griglia Calendario -->
+    <div class="calendar-grid" id="calendarGrid">
+        <!-- Popolato da JS -->
+    </div>
+
+    <!-- Azioni -->
+    <div class="calendar-actions" id="calendarActions" style="display:none;">
+        <p>Data selezionata: <span id="selectedDate"></span></p>
+        {% if current_user.is_admin() %}
+            <button id="btnCreateEvent" class="btn btn-primary">Crea Evento</button>
+        {% else %}
+            <button id="btnBook" class="btn btn-success" disabled>Prenota</button>
+        {% endif %}
+    </div>
+
+    <!-- Lista Eventi Giorno (per doppio click) -->
+    <div id="dayEventsModal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h3>Eventi del <span id="modalDate"></span></h3>
+            <div id="dayEventsList"></div>
+            <div id="seatsPreview"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    const isAdmin = {{ 'true' if current_user.is_admin() else 'false' }};
+    const userId = {{ current_user.id }};
+</script>
+<script src="{{ url_for('static', filename='js/calendar.js') }}"></script>
+{% endblock %}

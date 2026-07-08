@@ -1,0 +1,105 @@
+<!-- templates/event_create.html -->
+{% extends "base.html" %}
+{% block title %}Crea Evento{% endblock %}
+{% block content %}
+<div class="form-card">
+    <h2>Crea Nuovo Evento</h2>
+    <p class="text-muted">Data selezionata: <strong>{{ request.args.get('date', '') }}</strong></p>
+    
+    <form method="POST" id="createEventForm">
+        <div class="form-group">
+            <label>Sala</label>
+            <select name="sala_id" id="salaSelect" required class="form-control">
+                <option value="">-- Seleziona Sala --</option>
+                {% for sala in sale %}
+                <option value="{{ sala.id }}" data-posti="{{ sala.posti_max }}">{{ sala.nome }} (max {{ sala.posti_max }} posti)</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group col-6">
+                <label>Numero File</label>
+                <input type="number" name="file" id="fileInput" min="1" max="26" required class="form-control">
+            </div>
+            <div class="form-group col-6">
+                <label>Numero Colonne</label>
+                <input type="number" name="colonne" id="colonneInput" min="1" required class="form-control">
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label>Posti che verranno creati: <span id="calculatedSeats" class="badge">0</span></label>
+            <small class="text-muted">Deve essere ≤ posti max della sala</small>
+            <div id="seatsError" class="text-danger" style="display:none;">I posti superano la capacità della sala!</div>
+        </div>
+        
+        <div class="form-group">
+            <label>Nome Evento</label>
+            <input type="text" name="nome" required class="form-control">
+        </div>
+        
+        <div class="form-group">
+            <label>Descrizione</label>
+            <textarea name="descrizione" rows="3" class="form-control"></textarea>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group col-6">
+                <label>Data Evento</label>
+                <input type="date" name="data_evento" id="dataEvento" required class="form-control" min="{{ today }}">
+            </div>
+            <div class="form-group col-6">
+                <label>Ora Inizio</label>
+                <input type="time" name="ora_inizio" required class="form-control">
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label>Durata (minuti)</label>
+            <input type="number" name="durata" min="15" value="120" required class="form-control">
+        </div>
+        
+        <button type="submit" class="btn btn-primary btn-block" id="submitBtn">Crea Evento</button>
+    </form>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const dateParam = urlParams.get('date');
+        if (dateParam) {
+            document.getElementById('dataEvento').value = dateParam;
+        }
+        
+        const salaSelect = document.getElementById('salaSelect');
+        const fileInput = document.getElementById('fileInput');
+        const colonneInput = document.getElementById('colonneInput');
+        const calculatedSeats = document.getElementById('calculatedSeats');
+        const seatsError = document.getElementById('seatsError');
+        const submitBtn = document.getElementById('submitBtn');
+        
+        function calculateSeats() {
+            const file = parseInt(fileInput.value) || 0;
+            const colonne = parseInt(colonneInput.value) || 0;
+            const posti = file * colonne;
+            calculatedSeats.textContent = posti;
+            
+            const selectedOption = salaSelect.options[salaSelect.selectedIndex];
+            const maxPosti = parseInt(selectedOption.dataset.posti) || 0;
+            
+            if (posti > 0 && maxPosti > 0 && posti > maxPosti) {
+                seatsError.style.display = 'block';
+                submitBtn.disabled = true;
+            } else {
+                seatsError.style.display = 'none';
+                submitBtn.disabled = false;
+            }
+        }
+        
+        salaSelect.addEventListener('change', calculateSeats);
+        fileInput.addEventListener('input', calculateSeats);
+        colonneInput.addEventListener('input', calculateSeats);
+    });
+</script>
+{% endblock %}

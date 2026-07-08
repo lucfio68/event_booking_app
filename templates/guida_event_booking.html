@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guida EventBooking - Manuale Utente e Amministratore</title>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --accent: #3498db;
+            --success: #27ae60;
+            --warning: #e67e22;
+            --danger: #e74c3c;
+            --light: #f5f7fa;
+            --text: #333;
+            --border: #e0e0e0;
+            --select: #1abc9c;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.7;
+            color: var(--text);
+            background: var(--light);
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        header {
+            background: var(--primary);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+            border-radius: 0 0 20px 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            position: relative;
+        }
+        header h1 { font-size: 2.2em; margin-bottom: 10px; }
+        header p { opacity: 0.9; font-size: 1.1em; }
+        .version-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            margin-top: 10px;
+        }
+        .credits-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: background 0.3s;
+        }
+        .credits-btn:hover { background: rgba(255,255,255,0.3); }
+
+        .toc {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            margin-bottom: 30px;
+        }
+        .toc h2 { color: var(--primary); margin-bottom: 15px; border-bottom: 2px solid var(--accent); padding-bottom: 8px; }
+        .toc ul { list-style: none; columns: 2; }
+        .toc li { margin-bottom: 8px; }
+        .toc a { color: var(--accent); text-decoration: none; font-weight: 500; }
+        .toc a:hover { text-decoration: underline; }
+
+        .section {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            margin-bottom: 25px;
+        }
+        .section h2 {
+            color: var(--primary);
+            font-size: 1.6em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .section h3 {
+            color: var(--primary);
+            font-size: 1.2em;
+            margin: 25px 0 12px 0;
+            padding-left: 12px;
+            border-left: 4px solid var(--accent);
+        }
+        .section h4 {
+            color: #555;
+            font-size: 1.05em;
+            margin: 18px 0 8px 0;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .badge-user { background: #d4edda; color: #155724; }
+        .badge-admin { background: #fff3cd; color: #856404; }
+        .badge-config { background: #d1ecf1; color: #0c5460; }
+
+        .color-box {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            vertical-align: middle;
+            margin-right: 6px;
+            border: 1px solid rgba(0,0,0,0.1);
+        }
+
+        p { margin-bottom: 12px; }
+        ul, ol { margin-left: 20px; margin-bottom: 15px; }
+        li { margin-bottom: 6px; }
+
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95em;
+            color: #c7254e;
+        }
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+        pre code { background: transparent; color: inherit; padding: 0; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            font-size: 0.95em;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th { background: var(--light); font-weight: 600; color: var(--primary); }
+        tr:hover { background: #fafafa; }
+
+        .alert {
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 4px solid;
+        }
+        .alert-info { background: #e8f4fd; border-color: var(--accent); color: #0c5460; }
+        .alert-success { background: #d4edda; border-color: var(--success); color: #155724; }
+        .alert-warning { background: #fff3cd; border-color: var(--warning); color: #856404; }
+        .alert-danger { background: #f8d7da; border-color: var(--danger); color: #721c24; }
+
+        .screenshot {
+            background: #f8f9fa;
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            color: #7f8c8d;
+            margin: 15px 0;
+            font-style: italic;
+        }
+
+        .step {
+            display: flex;
+            gap: 15px;
+            margin: 15px 0;
+            padding: 15px;
+            background: #fafafa;
+            border-radius: 8px;
+            align-items: flex-start;
+        }
+        .step-num {
+            min-width: 36px;
+            height: 36px;
+            background: var(--accent);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        .step-content { flex: 1; }
+        .step-content h4 { margin: 0 0 5px 0; }
+
+        footer {
+            text-align: center;
+            padding: 30px;
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+
+        @media (max-width: 768px) {
+            .toc ul { columns: 1; }
+            .step { flex-direction: column; }
+            header h1 { font-size: 1.6em; }
+        }
+
+        .schema-box {
+            background: #f8f9fa;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            backdrop-filter: blur(4px);
+            animation: fadeIn 0.3s;
+        }
+        .modal-content {
+            background-color: white;
+            margin: 10% auto;
+            padding: 40px;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+            text-align: center;
+            position: relative;
+            animation: slideIn 0.3s;
+        }
+        .modal-content h2 {
+            color: var(--primary);
+            margin-bottom: 20px;
+            font-size: 1.8em;
+        }
+        .modal-content p { margin-bottom: 10px; font-size: 1.05em; }
+        .modal-content .heart { color: var(--danger); font-size: 1.2em; }
+        .close {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close:hover { color: var(--danger); }
+        @keyframes fadeIn { from {opacity:0} to {opacity:1} }
+        @keyframes slideIn { from {transform: translateY(-30px); opacity:0} to {transform: translateY(0); opacity:1} }
+    </style>
+<base target="_blank">
+</head>
+<body>
+
+<header>
+    <h1>📖 Guida EventBooking</h1>
+    <p>Manuale completo per utenti e amministratori</p>
+    <span class="version-badge">v1.2</span>
+    <button class="credits-btn" onclick="openCredits()">❤️ Credits</button>
+</header>
+
+<div class="container">
+
+<div class="toc">
+    <h2>📑 Indice</h2>
+    <ul>
+        <li><a href="#introduzione">1. Introduzione</a></li>
+        <li><a href="#utente">2. Guida Utente</a></li>
+        <li><a href="#utente-registrazione">2.1 Registrazione e Login</a></li>
+        <li><a href="#utente-calendario">2.2 Il Calendario Eventi</a></li>
+        <li><a href="#utente-prenotazione">2.3 Prenotare un Posto</a></li>
+        <li><a href="#utente-visualizza">2.4 Visualizzare Eventi</a></li>
+        <li><a href="#admin">3. Guida Amministratore</a></li>
+        <li><a href="#admin-installazione">3.1 Installazione e Configurazione</a></li>
+        <li><a href="#admin-database">3.2 Configurazione Database Neon</a></li>
+        <li><a href="#admin-email">3.3 Configurazione Email</a></li>
+        <li><a href="#admin-avvio">3.4 Primo Avvio</a></li>
+        <li><a href="#admin-sale">3.5 Gestione Sale</a></li>
+        <li><a href="#admin-eventi">3.6 Creazione Eventi</a></li>
+        <li><a href="#admin-prenotazioni">3.7 Gestione Prenotazioni</a></li>
+        <li><a href="#admin-ricerca">3.8 Ricerca e Filtri</a></li>
+        <li><a href="#admin-abbonato">3.9 Posti Abbonato</a></li>
+        <li><a href="#schema">4. Schema Database</a></li>
+        <li><a href="#faq">5. FAQ e Troubleshooting</a></li>
+        <li><a href="#changelog">6. Changelog</a></li>
+    </ul>
+</div>
+
+<div class="section" id="introduzione">
+    <h2>🎯 1. Introduzione</h2>
+    <p><strong>EventBooking</strong> e' un'applicazione web per la gestione e prenotazione di posti per eventi in sale conferenza, teatri, cinema o spazi simili.</p>
+    <h3>Caratteristiche principali</h3>
+    <ul>
+        <li>Calendario interattivo con navigazione per anno e mese</li>
+        <li>Gestione multi-sale con layout personalizzabili (file x colonne)</li>
+        <li>Prenotazione visuale dei posti con colori per stato</li>
+        <li>Notifiche email automatiche per conferme prenotazioni</li>
+        <li>Ricerca avanzata prenotazioni per amministratori</li>
+        <li>Database cloud su Neon PostgreSQL</li>
+    </ul>
+    <h3>Tipologie di utente</h3>
+    <table>
+        <tr><th>Ruolo</th><th>Descrizione</th><th>Permessi</th></tr>
+        <tr>
+            <td><span class="badge badge-user">Utente</span></td>
+            <td>Partecipante agli eventi</td>
+            <td>Visualizza calendario, prenota posti, riceve email di conferma</td>
+        </tr>
+        <tr>
+            <td><span class="badge badge-admin">Admin</span></td>
+            <td>Organizzatore / Gestore</td>
+            <td>Crea sale, crea eventi, gestisce prenotazioni, ricerca partecipanti, vede nomi sui posti</td>
+        </tr>
+    </table>
+</div>
+
+<div class="section" id="utente">
+    <h2>👤 2. Guida Utente</h2>
+    <p>Questa sezione spiega come utilizzare EventBooking come partecipante agli eventi.</p>
+</div>
+
+<div class="section" id="utente-registrazione">
+    <h2><span class="badge badge-user">Utente</span> 2.1 Registrazione e Login</h2>
+    <h3>Registrazione</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Accedi alla pagina di registrazione</h4>
+            <p>Clicca su <strong>Registrati</strong> nella barra di navigazione.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Compila il modulo</h4>
+            <p>Inserisci:</p>
+            <ul>
+                <li><strong>Nome e Cognome</strong>: il tuo nome completo</li>
+                <li><strong>Email</strong>: indirizzo valido (serve per le conferme)</li>
+                <li><strong>Cellulare</strong>: numero di telefono (opzionale ma consigliato)</li>
+                <li><strong>Password</strong>: almeno 8 caratteri</li>
+            </ul>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Conferma</h4>
+            <p>Clicca <strong>Registrati</strong>. Verrai reindirizzato alla pagina di login.</p>
+        </div>
+    </div>
+    <div class="alert alert-info">
+        <strong>Nota:</strong> Il primo account admin deve essere creato manualmente nel database o tramite procedura dedicata.
+    </div>
+    <h3>Login</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Inserisci le credenziali</h4>
+            <p>Usa l'email e la password scelti in fase di registrazione.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Accesso al calendario</h4>
+            <p>Dopo il login vedrai il calendario degli eventi.</p>
+        </div>
+    </div>
+</div>
+
+<div class="section" id="utente-calendario">
+    <h2><span class="badge badge-user">Utente</span> 2.2 Il Calendario Eventi</h2>
+    <p>Il calendario e' la schermata principale dell'applicazione. Mostra gli eventi programmati mese per mese.</p>
+    <h3>Navigazione</h3>
+    <table>
+        <tr><th>Elemento</th><th>Azione</th></tr>
+        <tr><td>◀ Anno ▶</td><td>Cambia l'anno visualizzato</td></tr>
+        <tr><td>◀ Mese ▶</td><td>Scorri tra i mesi dell'anno</td></tr>
+        <tr><td>Giorno con sfondo verde</td><td>Indica la presenza di uno o piu' eventi</td></tr>
+        <tr><td>Giorno con bordo blu</td><td>E' oggi</td></tr>
+        <tr><td>Giorno grigio</td><td>Data passata (non selezionabile)</td></tr>
+    </table>
+    <h3>Interazione con le date</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Clic singolo su una data</h4>
+            <p>Seleziona il giorno. Appariranno i pulsanti di azione:</p>
+            <ul>
+                <li><strong>Prenota</strong> (se c'e' un evento in quella data)</li>
+            </ul>
+            <p>Le date passate non sono selezionabili.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Doppio click su una data con evento</h4>
+            <p>Si apre un modale che mostra:</p>
+            <ul>
+                <li>La lista degli eventi di quel giorno</li>
+                <li>Pulsante <strong>Prenota</strong> per ogni evento</li>
+            </ul>
+        </div>
+    </div>
+    <div class="screenshot">[Screenshot: Calendario con anno, mese, giorni e eventi evidenziati]</div>
+</div>
+
+<div class="section" id="utente-prenotazione">
+    <h2><span class="badge badge-user">Utente</span> 2.3 Prenotare un Posto</h2>
+    <p>La prenotazione avviene tramite una mappa visiva della sala, dove ogni posto e' rappresentato da un riquadro colorato.</p>
+    <h3>Legenda colori</h3>
+    <table>
+        <tr><th>Colore</th><th>Stato</th><th>Significato</th></tr>
+        <tr>
+            <td><span class="color-box" style="background:#ffffff; border:1px solid #ccc;"></span> Bianco</td>
+            <td>Libero</td>
+            <td>Posto disponibile, cliccabile</td>
+        </tr>
+        <tr>
+            <td><span class="color-box" style="background:#e67e22;"></span> Arancione</td>
+            <td>Riservato</td>
+            <td>Posto temporaneamente bloccato dall'amministratore</td>
+        </tr>
+        <tr>
+            <td><span class="color-box" style="background:#3498db;"></span> Azzurro</td>
+            <td>Prenotato</td>
+            <td>Posto gia' occupato</td>
+        </tr>
+        <tr>
+            <td><span class="color-box" style="background:#1abc9c;"></span> Verde Acqua</td>
+            <td>In selezione</td>
+            <td>Posti che stai selezionando (clicca di nuovo per deselezionare)</td>
+        </tr>
+        <tr>
+            <td><span class="color-box" style="background:#8b5cf6;"></span> Viola</td>
+            <td>Abbonato</td>
+            <td>Posto riservato agli abbonati (gestito solo dall'amministratore)</td>
+        </tr>
+    </table>
+    <div class="alert alert-info">
+        <strong>Nuovo:</strong> Il colore <em>In selezione</em> e' stato aggiornato a <strong>Verde Acqua</strong> per una migliore distinzione visiva rispetto all'arancione dei posti riservati.
+    </div>
+    <h3>Procedura di prenotazione</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Seleziona l'evento</h4>
+            <p>Dal calendario, clicca su una data con evento e poi su <strong>Prenota</strong>.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Scegli i posti</h4>
+            <p>Clicca sui posti bianchi (liberi) per selezionarli. Diventeranno <strong>verdi acqua</strong>.</p>
+            <p>Puoi selezionare <strong>uno o piu' posti</strong> contemporaneamente.</p>
+            <p>Per deselezionare un posto, cliccalo di nuovo.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Conferma</h4>
+            <p>Clicca <strong>Conferma Prenotazione</strong>. I posti diventeranno <strong>azzurri</strong> (prenotati).</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            <h4>Email di conferma</h4>
+            <p>Riceverai un'email all'indirizzo registrato con i dettagli della prenotazione:</p>
+            <ul>
+                <li>Nome dell'evento</li>
+                <li>Data e ora</li>
+                <li>Sala</li>
+                <li>Posti prenotati (es. A1, A2, B3)</li>
+            </ul>
+        </div>
+    </div>
+    <div class="alert alert-warning">
+        <strong>Attenzione:</strong> Una volta confermata, la prenotazione non puo' essere annullata direttamente dall'utente. Contatta un amministratore per modifiche.
+    </div>
+    <div class="screenshot">[Screenshot: Layout sala con posti colorati, fila A, B, C... e colonne numerate]</div>
+</div>
+
+<div class="section" id="utente-visualizza">
+    <h2><span class="badge badge-user">Utente</span> 2.4 Visualizzare Eventi</h2>
+    <h3>Doppio click su data con evento</h3>
+    <p>Effettuando un doppio click su un giorno che contiene un evento, si apre una finestra modale che mostra:</p>
+    <ul>
+        <li>Nome dell'evento</li>
+        <li>Ora di inizio</li>
+        <li>Nome della sala</li>
+        <li>Pulsante per prenotare</li>
+    </ul>
+    <h3>Informazioni evento</h3>
+    <p>Ogni evento mostra nel calendario:</p>
+    <ul>
+        <li>Nome abbreviato nella cella del giorno</li>
+        <li>Orario di inizio</li>
+        <li>Nome della sala tra parentesi</li>
+    </ul>
+</div>
+
+<div class="section" id="admin">
+    <h2>🔧 3. Guida Amministratore</h2>
+    <p>Questa sezione e' dedicata alla configurazione, installazione e gestione dell'applicazione.</p>
+</div>
+
+<div class="section" id="admin-installazione">
+    <h2><span class="badge badge-config">Config</span> 3.1 Installazione e Configurazione</h2>
+    <h3>Requisiti di sistema</h3>
+    <ul>
+        <li>Python 3.9 o superiore</li>
+        <li>Connessione Internet (per database Neon e email)</li>
+    </ul>
+    <h3>Installazione passo-passo</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Scarica il progetto</h4>
+            <p>Estrai l'archivio in una cartella sul tuo PC.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Crea l'ambiente virtuale</h4>
+            <pre>cd event_booking_app
+python -m venv venv</pre>
+            <p>Su Windows:</p>
+            <pre>venv\Scriptsctivate</pre>
+            <p>Su Linux/Mac:</p>
+            <pre>source venv/bin/activate</pre>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Installa le dipendenze</h4>
+            <pre>pip install -r requirements.txt</pre>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            <h4>Crea il file .env</h4>
+            <p>Nella stessa cartella di <code>app.py</code>, crea un file chiamato <code>.env</code>:</p>
+            <pre>SECRET_KEY=una-chiave-sicura-lunga-e-casuale-123456789
+DATABASE_URL=postgresql://user:password@host.neon.tech/db?sslmode=require
+MAIL_SERVER=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USE_TLS=true
+MAIL_USERNAME=tua-email@gmail.com
+MAIL_PASSWORD=la-tua-app-password
+MAIL_DEFAULT_SENDER=tua-email@gmail.com</pre>
+            <div class="alert alert-danger">
+                <strong>Importante:</strong> Non condividere mai il file <code>.env</code> o committarlo su GitHub! Aggiungilo al <code>.gitignore</code>.
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="section" id="admin-database">
+    <h2><span class="badge badge-config">Config</span> 3.2 Configurazione Database Neon</h2>
+    <h3>Creare un database su Neon</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Registrati su Neon</h4>
+            <p>Vai su <a href="https://neon.tech" target="_blank">neon.tech</a> e crea un account gratuito.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Crea un nuovo progetto</h4>
+            <p>Clicca <strong>New Project</strong>, scegli il nome e la regione piu' vicina a te.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Ottieni la stringa di connessione</h4>
+            <p>Nella dashboard di Neon, vai su <strong>Connection Details</strong> e copia la stringa:</p>
+            <pre>postgresql://user:password@ep-xxx.neon.tech/neondb?sslmode=require</pre>
+            <p>Incollala nel file <code>.env</code> come valore di <code>DATABASE_URL</code>.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            <h4>Crea le tabelle</h4>
+            <p>Avvia l'applicazione e visita (una sola volta):</p>
+            <pre>http://localhost:5000/init-db</pre>
+            <div class="alert alert-warning">
+                <strong>Attenzione:</strong> Dopo la prima inizializzazione, rimuovi o proteggi la route <code>/init-db</code> in produzione.
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="section" id="admin-email">
+    <h2><span class="badge badge-config">Config</span> 3.3 Configurazione Email</h2>
+    <p>L'applicazione invia email di conferma agli utenti e agli amministratori delle sale.</p>
+    <h3>Configurazione Gmail (consigliata)</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Abilita l'autenticazione a due fattori</h4>
+            <p>Vai su <a href="https://myaccount.google.com/security" target="_blank">myaccount.google.com/security</a> e attiva la verifica in 2 passaggi.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Genera una App Password</h4>
+            <p>Vai su <strong>Password e autenticazione</strong> → <strong>Password per app</strong> → seleziona <em>Mail</em> e <em>Altro (nome personalizzato)</em>.</p>
+            <p>Copia la password generata (16 caratteri) e incollala nel <code>.env</code> come <code>MAIL_PASSWORD</code>.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Verifica nel .env</h4>
+            <pre>MAIL_SERVER=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USE_TLS=true
+MAIL_USERNAME=tua-email@gmail.com
+MAIL_PASSWORD=xxxx-xxxx-xxxx-xxxx
+MAIL_DEFAULT_SENDER=tua-email@gmail.com</pre>
+        </div>
+    </div>
+</div>
+
+<div class="section" id="admin-avvio">
+    <h2><span class="badge badge-config">Config</span> 3.4 Primo Avvio</h2>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Attiva l'ambiente virtuale</h4>
+            <pre>venv\Scriptsctivate   (Windows)
+source venv/bin/activate    (Linux/Mac)</pre>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Avvia l'applicazione</h4>
+            <pre>python app.py</pre>
+            <p>Dovresti vedere:</p>
+            <pre> * Running on http://0.0.0.0:5000</pre>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Inizializza il database</h4>
+            <p>Apri il browser e visita:</p>
+            <pre>http://localhost:5000/init-db</pre>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            <h4>Crea il primo account admin</h4>
+            <p>Modifica il campo <code>tipo</code> nel database da <code>user</code> a <code>admin</code> per il primo utente.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-content">
+            <h4>Inizia a usare l'app</h4>
+            <p>Login → Crea una sala → Crea un evento → Testa la prenotazione.</p>
+        </div>
+    </div>
+    <div class="alert alert-success">
+        <strong>Deploy in produzione:</strong> Per un server pubblico, considera l'uso di <strong>Gunicorn</strong> + <strong>Nginx</strong> o piattaforme come <strong>Render</strong>, <strong>Railway</strong> o <strong>Heroku</strong>.
+    </div>
+</div>
+
+<div class="section" id="admin-sale">
+    <h2><span class="badge badge-admin">Admin</span> 3.5 Gestione Sale</h2>
+    <p>Le sale sono gli spazi fisici dove si tengono gli eventi.</p>
+    <div class="alert alert-info">
+        <strong>Nota:</strong> Al momento la creazione delle sale richiede l'inserimento diretto nel database o tramite script.
+    </div>
+    <h3>Inserire una sala tramite Python</h3>
+    <pre>from app import app
+from models import db, Sala
+
+with app.app_context():
+    sala = Sala(
+        nome="Sala Conferenze A",
+        descrizione="Sala principale con proiettore e audio",
+        indirizzo="Via Roma 123, Milano",
+        posti_max=120,
+        email_admin="admin1@example.com, admin2@example.com"
+    )
+    db.session.add(sala)
+    db.session.commit()
+    print(f"Sala '{sala.nome}' creata con ID {sala.id}")</pre>
+    <h3>Campi della tabella Sala</h3>
+    <table>
+        <tr><th>Campo</th><th>Tipo</th><th>Descrizione</th></tr>
+        <tr><td>nome</td><td>Testo</td><td>Nome identificativo della sala</td></tr>
+        <tr><td>descrizione</td><td>Testo</td><td>Dettagli, dotazioni, note</td></tr>
+        <tr><td>indirizzo</td><td>Testo</td><td>Indirizzo fisico della sala</td></tr>
+        <tr><td>posti_max</td><td>Intero</td><td>Capacita' massima totale</td></tr>
+        <tr><td>email_admin</td><td>Testo</td><td>Email separate da virgola per notifiche</td></tr>
+    </table>
+</div>
+
+<div class="section" id="admin-eventi">
+    <h2><span class="badge badge-admin">Admin</span> 3.6 Creazione Eventi</h2>
+    <p>Gli amministratori possono creare eventi selezionando una data futura dal calendario.</p>
+    <h3>Procedura</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Seleziona la data</h4>
+            <p>Dal calendario, clicca su un giorno <strong>futuro</strong>.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Clicca "Crea Evento"</h4>
+            <p>Verrai reindirizzato al modulo di creazione con la data precompilata.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Compila il modulo</h4>
+            <table>
+                <tr><th>Campo</th><th>Descrizione</th></tr>
+                <tr><td>Sala</td><td>Seleziona la sala dall'elenco</td></tr>
+                <tr><td>Numero File</td><td>Quante file di posti (max 26, corrispondono alle lettere A-Z)</td></tr>
+                <tr><td>Numero Colonne</td><td>Quante colonne per fila</td></tr>
+                <tr><td>Nome Evento</td><td>Titolo dell'evento</td></tr>
+                <tr><td>Descrizione</td><td>Dettagli opzionali</td></tr>
+                <tr><td>Data Evento</td><td>Precompilata, modificabile solo in date future</td></tr>
+                <tr><td>Ora Inizio</td><td>Orario di inizio (formato HH:MM)</td></tr>
+                <tr><td>Durata</td><td>Durata in minuti (default 120)</td></tr>
+            </table>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            <h4>Verifica la capacita'</h4>
+            <p>L'applicazione calcola automaticamente i posti totali (file x colonne).</p>
+            <div class="alert alert-warning">
+                Se i posti creati superano la capacita' della sala, l'evento non verra' creato.
+            </div>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-content">
+            <h4>Conferma creazione</h4>
+            <p>Clicca <strong>Crea Evento</strong>. I posti verranno generati automaticamente con file A, B, C... e colonne numerate.</p>
+        </div>
+    </div>
+    <div class="screenshot">[Screenshot: Modulo creazione evento]</div>
+</div>
+
+<div class="section" id="admin-prenotazioni">
+    <h2><span class="badge badge-admin">Admin</span> 3.7 Gestione Prenotazioni</h2>
+    <p>Gli amministratori possono visualizzare lo stato di tutti i posti e accedere ai dettagli.</p>
+    <h3>Visualizzare i posti prenotati</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Doppio click su data con evento</h4>
+            <p>Dal calendario, effettua un doppio click su un giorno che contiene un evento.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Clicca "Gestisci"</h4>
+            <p>Nel modale, clicca il pulsante <strong>Gestisci</strong> relativo all'evento.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Layout della sala</h4>
+            <p>Vedrai la mappa completa della sala con i posti colorati:</p>
+            <ul>
+                <li><strong>Bianco</strong>: Libero</li>
+                <li><strong>Arancione</strong>: Riservato</li>
+                <li><strong>Azzurro</strong>: Prenotato</li>
+            </ul>
+            <p>Sui posti azzurri apparira' il <strong>nome abbreviato</strong> dell'utente.</p>
+        </div>
+    </div>
+    <h3>Dettagli di una singola prenotazione</h3>
+    <p>Clicca su un posto azzurro per aprire un modale con:</p>
+    <ul>
+        <li>ID prenotazione</li>
+        <li>Nome completo dell'utente</li>
+        <li>Email</li>
+        <li>Numero di cellulare</li>
+        <li>Data e ora della prenotazione</li>
+        <li>Elenco completo dei posti prenotati</li>
+    </ul>
+</div>
+
+<div class="section" id="admin-ricerca">
+    <h2><span class="badge badge-admin">Admin</span> 3.8 Ricerca e Filtri</h2>
+    <p>Nella pagina di gestione evento, gli admin possono cercare le prenotazioni.</p>
+    <h3>Come funziona la ricerca</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Inserisci il termine di ricerca</h4>
+            <p>Nella barra di ricerca, digita un nome o email parziale.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Clicca "Cerca"</h4>
+            <p>La tabella verra' filtrata in tempo reale.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Reset</h4>
+            <p>Clicca <strong>Reset</strong> per tornare alla visualizzazione completa.</p>
+        </div>
+    </div>
+    <div class="screenshot">[Screenshot: Pagina admin con barra di ricerca]</div>
+</div>
+
+<div class="section" id="admin-abbonato">
+    <h2><span class="badge badge-admin">Admin</span> 3.9 Posti Abbonato</h2>
+    <p>I posti <strong>Abbonato</strong> sono una tipologia speciale di posto riservato, gestibile esclusivamente dagli amministratori. Funzionano in modo simile ai posti "Riservati" ma con un colore distintivo (viola) per identificarli facilmente nella mappa della sala.</p>
+
+    <h3>Caratteristiche</h3>
+    <ul>
+        <li><strong>Visibilità</strong>: visibili a tutti gli utenti con colore viola</li>
+        <li><strong>Prenotabilità</strong>: gli utenti normali <strong>non</strong> possono prenotarli</li>
+        <li><strong>Gestione</strong>: solo gli admin possono creare o cancellare posti abbonato</li>
+        <li><strong>Email</strong>: le notifiche di cancellazione funzionano come per le altre prenotazioni</li>
+    </ul>
+
+    <h3>Procedura per abbonare posti</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Seleziona l'evento</h4>
+            <p>Dal calendario, accedi alla pagina di prenotazione dell'evento desiderato.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Seleziona i posti liberi</h4>
+            <p>Clicca sui posti bianchi (liberi) che vuoi riservare agli abbonati.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Clicca "Abbona Posti"</h4>
+            <p>Il pulsante viola <strong>🎫 Abbona Posti</strong> appare solo agli admin. Cliccalo per confermare.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            <h4>Inserisci il nome (opzionale)</h4>
+            <p>Puoi personalizzare il nome dell'abbonamento, oppure lasciare il default "Abbonato".</p>
+        </div>
+    </div>
+
+    <h3>Cancellare posti abbonato</h3>
+    <p>Gli admin possono cancellare i posti abbonato cliccandoli (apparirà l'animazione rossa di selezione per cancellazione) e poi premendo <strong>🗑️ Cancella Selezionati</strong>.</p>
+
+    <div class="alert alert-info">
+        <strong>Nota:</strong> I posti abbonato condividono la logica dei posti riservati ma usano lo stato <code>abbonato</code> nel database e il colore <code>#8b5cf6</code> (viola) nell'interfaccia.
+    </div>
+</div>
+
+<div class="section" id="schema">
+    <h2>🗄️ 4. Schema Database</h2>
+    <p>L'applicazione utilizza PostgreSQL (Neon) con il seguente schema relazionale:</p>
+    <h3>Tabella <code>utente</code></h3>
+    <div class="schema-box">
+┌─────────────────┬─────────────┬──────────┬─────────────────────────────┐
+│ Campo           │ Tipo        │ Obblig.  │ Note                        │
+├─────────────────┼─────────────┼──────────┼─────────────────────────────┤
+│ id              │ INTEGER PK  │ Si'       │ Auto-increment              │
+│ nome_cognome    │ VARCHAR(150)│ Si'       │ Nome completo               │
+│ cellulare       │ VARCHAR(20) │ No       │ Numero telefono             │
+│ email           │ VARCHAR(120)│ Si'       │ Univoco, usato per login    │
+│ password_hash   │ VARCHAR(256)│ Si'     │ Hash bcrypt                 │
+│ tipo            │ VARCHAR(20) │ No       │ admin / user (default)      │
+│ data_registrazione│ DATETIME  │ No       │ Auto                        │
+└─────────────────┴─────────────┴──────────┴─────────────────────────────┘
+    </div>
+    <h3>Tabella <code>sala</code></h3>
+    <div class="schema-box">
+┌─────────────────┬─────────────┬──────────┬─────────────────────────────┐
+│ Campo           │ Tipo        │ Obblig.  │ Note                        │
+├─────────────────┼─────────────┼──────────┼─────────────────────────────┤
+│ id              │ INTEGER PK  │ Si'       │ Auto-increment              │
+│ nome            │ VARCHAR(100)│ Si'       │ Nome identificativo         │
+│ descrizione     │ TEXT        │ No       │ Dettagli e dotazioni        │
+│ indirizzo       │ VARCHAR(255)│ No       │ Indirizzo fisico            │
+│ posti_max       │ INTEGER     │ Si'       │ Capacita' massima            │
+│ email_admin     │ TEXT        │ No       │ Email separate da virgola   │
+└─────────────────┴─────────────┴──────────┴─────────────────────────────┘
+    </div>
+    <h3>Tabella <code>evento</code></h3>
+    <div class="schema-box">
+┌─────────────────┬─────────────┬──────────┬─────────────────────────────┐
+│ Campo           │ Tipo        │ Obblig.  │ Note                        │
+├─────────────────┼─────────────┼──────────┼─────────────────────────────┤
+│ id              │ INTEGER PK  │ Si'       │ Auto-increment              │
+│ nome            │ VARCHAR(150)│ Si'       │ Titolo evento               │
+│ descrizione     │ TEXT        │ No       │ Dettagli                    │
+│ data_evento     │ DATE        │ Si'       │ Data dell'evento            │
+│ ora_inizio      │ TIME        │ Si'       │ Ora di inizio               │
+│ durata          │ INTEGER     │ Si'       │ Durata in minuti           │
+│ posti_max       │ INTEGER     │ Si'       │ File x colonne              │
+│ file            │ INTEGER     │ Si'       │ Numero file (A, B, C...)    │
+│ colonne         │ INTEGER     │ Si'       │ Numero colonne              │
+│ sala_id         │ INTEGER FK  │ Si'       │ -> sala.id                   │
+│ creato_da       │ INTEGER FK  │ Si'       │ -> utente.id                 │
+│ data_creazione  │ DATETIME    │ No       │ Auto                        │
+└─────────────────┴─────────────┴──────────┴─────────────────────────────┘
+    </div>
+    <h3>Tabella <code>prenotazione</code></h3>
+    <div class="schema-box">
+┌─────────────────┬─────────────┬──────────┬─────────────────────────────┐
+│ Campo           │ Tipo        │ Obblig.  │ Note                        │
+├─────────────────┼─────────────┼──────────┼─────────────────────────────┤
+│ id              │ INTEGER PK  │ Si'       │ Auto-increment              │
+│ evento_id       │ INTEGER FK  │ Si'       │ -> evento.id                 │
+│ utente_id       │ INTEGER FK  │ Si'       │ -> utente.id                 │
+│ stato           │ VARCHAR(50) │ No       │ confermata / annullata / abbonata   │
+│ data_prenotazione│ DATETIME   │ No       │ Auto                        │
+└─────────────────┴─────────────┴──────────┴─────────────────────────────┘
+    </div>
+    <h3>Tabella <code>posto</code></h3>
+    <div class="schema-box">
+┌─────────────────┬─────────────┬──────────┬─────────────────────────────┐
+│ Campo           │ Tipo        │ Obblig.  │ Note                        │
+├─────────────────┼─────────────┼──────────┼─────────────────────────────┤
+│ id              │ INTEGER PK  │ Si'       │ Auto-increment              │
+│ sala_id         │ INTEGER FK  │ Si'       │ -> sala.id                   │
+│ evento_id       │ INTEGER FK  │ Si'       │ -> evento.id                 │
+│ numero_posto    │ INTEGER     │ Si'       │ Numero progressivo          │
+│ fila            │ VARCHAR(10) │ Si'       │ Lettera (A, B, C...)        │
+│ colonna         │ INTEGER     │ Si'       │ Numero colonna              │
+│ stato           │ VARCHAR(20) │ No       │ libero/riservato/prenotato/abbonato │
+│ prenotazione_id │ INTEGER FK  │ No       │ -> prenotazione.id (nullable)│
+└─────────────────┴─────────────┴──────────┴─────────────────────────────┘
+    </div>
+    <h3>Relazioni</h3>
+    <ul>
+        <li><code>sala</code> -> <code>evento</code> (1:N)</li>
+        <li><code>sala</code> -> <code>posto</code> (1:N)</li>
+        <li><code>evento</code> -> <code>posto</code> (1:N)</li>
+        <li><code>evento</code> -> <code>prenotazione</code> (1:N)</li>
+        <li><code>utente</code> -> <code>prenotazione</code> (1:N)</li>
+        <li><code>prenotazione</code> -> <code>posto</code> (1:N)</li>
+    </ul>
+</div>
+
+<div class="section" id="faq">
+    <h2>❓ 5. FAQ e Troubleshooting</h2>
+    <h3>Problemi comuni</h3>
+    <h4>🔴 L'applicazione non si avvia</h4>
+    <div class="alert alert-danger">
+        <p><strong>Verifica:</strong></p>
+        <ul>
+            <li>L'ambiente virtuale e' attivo?</li>
+            <li>Hai installato tutte le dipendenze?</li>
+            <li>La porta 5000 e' libera?</li>
+        </ul>
+    </div>
+    <h4>🔴 Errore di connessione al database</h4>
+    <div class="alert alert-danger">
+        <p><strong>Verifica:</strong></p>
+        <ul>
+            <li>La stringa <code>DATABASE_URL</code> nel file <code>.env</code> e' corretta?</li>
+            <li>Hai incluso <code>?sslmode=require</code>?</li>
+            <li>Hai eseguito <code>/init-db</code> almeno una volta?</li>
+        </ul>
+    </div>
+    <h4>🔴 Le email non arrivano</h4>
+    <div class="alert alert-danger">
+        <p><strong>Verifica:</strong></p>
+        <ul>
+            <li>Stai usando una <strong>App Password</strong> Gmail?</li>
+            <li>Le credenziali nel <code>.env</code> sono corrette?</li>
+            <li>Controlla la cartella <strong>Spam</strong>.</li>
+        </ul>
+    </div>
+    <h4>🟡 Non vedo il pulsante "Crea Evento"</h4>
+    <div class="alert alert-warning">
+        <p>Il pulsante appare solo agli utenti con tipo <code>admin</code>.</p>
+    </div>
+    <h4>🟡 Non posso prenotare posti</h4>
+    <div class="alert alert-warning">
+        <ul>
+            <li>L'evento e' in una data passata</li>
+            <li>I posti sono gia' tutti prenotati</li>
+            <li>Non hai effettuato il login</li>
+        </ul>
+    </div>
+    <h4>🟢 Come faccio il backup del database?</h4>
+    <div class="alert alert-success">
+        <pre>pg_dump "DATABASE_URL" > backup.sql</pre>
+    </div>
+    <h4>🟢 Posso usare un altro database?</h4>
+    <div class="alert alert-success">
+        <p>Si', modifica la stringa <code>DATABASE_URL</code>. Compatibile con PostgreSQL, MySQL, SQLite.</p>
+    </div>
+</div>
+
+<div class="section" id="changelog">
+    <h2>📝 6. Changelog</h2>
+
+    <h3>v1.2 (2026)</h3>
+    <ul>
+        <li><strong>Nuovo:</strong> Posti "Abbonato" — tipologia di posto riservato gestibile solo da admin, colore viola</li>
+        <li><strong>Nuovo:</strong> Pulsante "🎫 Abbona Posti" nella pagina di prenotazione (solo admin)</li>
+        <li><strong>Fix:</strong> Rimosso <code>with_for_update()</code> dalle query per compatibilità con Neon PostgreSQL in modalità read-only</li>
+        <li><strong>Fix:</strong> Endpoint database aggiornato da <code>-pooler</code> a connessione diretta per evitare transazioni read-only</li>
+        <li><strong>Fix:</strong> Ternari JavaScript sostituiti con <code>if/else</code> espliciti per evitare errori di parsing</li>
+        <li><strong>Update:</strong> Guida aggiornata con sezione Posti Abbonato e Changelog</li>
+    </ul>
+
+    <h3>v1.1 (2026)</h3>
+    <ul>
+        <li><strong>Fix:</strong> Colore "In selezione" cambiato da giallo a verde acqua per migliore distinzione visiva</li>
+        <li><strong>Nuovo:</strong> Link "📖 Guida" nella navbar</li>
+        <li><strong>Nuovo:</strong> Modal Credits con informazioni sviluppatore</li>
+        <li><strong>Update:</strong> Documentazione aggiornata per installazione e configurazione</li>
+    </ul>
+
+    <h3>v1.0 (2026)</h3>
+    <ul>
+        <li>Release iniziale con calendario, prenotazione posti, gestione admin, email automatiche</li>
+    </ul>
+</div>
+
+<footer>
+    <p>📘 Guida EventBooking v1.2</p>
+    <p>Per supporto, aggiornamenti o segnalazione bug, contatta l'amministratore di sistema.</p>
+    <p style="margin-top:10px;"><a href="#" onclick="openCredits(); return false;" style="color:var(--accent);">Credits</a></p>
+</footer>
+
+</div>
+
+<div id="creditsModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeCredits()">&times;</span>
+        <h2>❤️ Credits</h2>
+        <p style="font-size:1.2em; margin: 20px 0;">
+            <strong>EventBooking</strong>
+        </p>
+        <p>
+            Ideato e sviluppato da<br>
+            <strong style="font-size:1.1em; color:var(--primary);">Luca Fiorini</strong>
+        </p>
+        <p style="margin-top:15px;">
+            Con il contributo di<br>
+            <strong style="color:var(--accent);">Kimi AI</strong> <span class="heart">❤️</span><br>
+            <small>(Moonshot AI)</small>
+        </p>
+        <p style="margin-top:20px; color:#666; font-size:0.9em;">
+            Versione 1.1 · 2026
+        </p>
+    </div>
+</div>
+
+<script>
+    function openCredits() {
+        document.getElementById('creditsModal').style.display = 'block';
+    }
+    function closeCredits() {
+        document.getElementById('creditsModal').style.display = 'none';
+    }
+    window.onclick = function(event) {
+        var modal = document.getElementById('creditsModal');
+        if (event.target == modal) {
+            modal.style.display = 'none';
+        }
+    }
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeCredits();
+    });
+</script>
+
+</body>
+</html>
