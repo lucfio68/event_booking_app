@@ -446,10 +446,15 @@ def create_event():
             flash('Formato ora non valido.', 'danger')
             return redirect(url_for('create_event'))
 
+        corridoio_colonne = request.form.get('corridoio_colonne', '').strip()
+        corridoio_file = request.form.get('corridoio_file', '').strip()
+
         evento = Evento(
             nome=nome, descrizione=descrizione, data_evento=data_obj,
             ora_inizio=ora_obj, durata=durata, posti_max=posti_max,
-            file=file, colonne=colonne, sala_id=sala_id, creato_da=current_user.id
+            file=file, colonne=colonne,
+            corridoio_colonne=corridoio_colonne, corridoio_file=corridoio_file,
+            sala_id=sala_id, creato_da=current_user.id
         )
         db.session.add(evento)
         db.session.flush()
@@ -473,6 +478,45 @@ def create_event():
     sale = Sala.query.all()
     return render_template('event_create.html', sale=sale, today=date.today().strftime('%Y-%m-%d'))
 
+# ==================== ELIMINA EVENTO (ADMIN) ====================
+
+@app.route('/api/event/delete/<int:event_id>', methods=['POST'])
+@login_required
+@limiter.limit("10 per minute")
+def api_delete_event(event_id):
+    if not current_user.is_admin():
+        return jsonify({'error': 'Solo gli amministratori possono eliminare eventi'}), 403
+
+    try:
+        evento = db.session.get(Evento, event_id)
+        if not evento:
+            return jsonify({'error': 'Evento non trovato'}), 404
+
+        # Elimina tutte le prenotazioni associate (cascade su posti)
+        prenotazioni = Prenotazione.query.filter_by(evento_id=event_id).all()
+        for p in prenotazioni:
+            # Libera i posti
+            posti = Posto.query.filter_by(prenotazione_id=p.id).all()
+            for posto in posti:
+                posto.stato = 'libero'
+                posto.prenotazione_id = None
+            db.session.delete(p)
+
+        # Elimina i posti dell'evento
+        posti_evento = Posto.query.filter_by(evento_id=event_id).all()
+        for posto in posti_evento:
+            db.session.delete(posto)
+
+        # Elimina l'evento
+        db.session.delete(evento)
+        db.session.commit()
+
+        return jsonify({'success': True, 'message': 'Evento eliminato con successo'})
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f'Errore eliminazione evento: {e}')
+        return jsonify({"error": "Errore interno durante l'eliminazione"}), 500
+
 # ==================== PRENOTAZIONE ====================
 
 @app.route('/booking/<int:event_id>')
@@ -489,9 +533,25 @@ def booking_page(event_id):
 @app.route('/api/seats/<int:event_id>')
 @login_required
 def api_seats(event_id):
+    evento = db.session.get(Evento, event_id)
     posti = Posto.query.options(
         joinedload(Posto.prenotazione).joinedload(Prenotazione.utente)
     ).filter_by(evento_id=event_id).order_by(Posto.fila, Posto.colonna).all()
+
+    # Parse corridoi
+    corridoio_colonne = []
+    if evento and evento.corridoio_colonne:
+        try:
+            corridoio_colonne = [int(x.strip()) for x in evento.corridoio_colonne.split(',') if x.strip()]
+        except ValueError:
+            corridoio_colonne = []
+
+    corridoio_file = []
+    if evento and evento.corridoio_file:
+        try:
+            corridoio_file = [int(x.strip()) for x in evento.corridoio_file.split(',') if x.strip()]
+        except ValueError:
+            corridoio_file = []
 
     result = []
     for p in posti:
@@ -501,7 +561,9 @@ def api_seats(event_id):
             'colonna': p.colonna,
             'stato': p.stato,
             'numero_posto': p.numero_posto,
-            'utente_id': None
+            'utente_id': None,
+            'corridoio_colonne': corridoio_colonne,
+            'corridoio_file': corridoio_file
         }
         if p.prenotazione:
             item['utente_id'] = p.prenotazione.utente_id
@@ -936,6 +998,42 @@ def api_prenotazione_detail(prenotazione_id):
         'stato': pren.stato,
         'posti': [{'fila': p.fila, 'colonna': p.colonna, 'id': p.id} for p in pren.posti]
     })
+
+
+# ==================== RICERCA POSTI (ADMIN) ====================
+
+@app.route('/api/seats/search/<int:event_id>')
+@login_required
+def api_seats_search(event_id):
+    if not current_user.is_admin():
+        return jsonify({'error': 'Accesso negato'}), 403
+
+    search = request.args.get('q', '').strip().lower()
+    if not search:
+        return jsonify({'error': 'Termine di ricerca richiesto'}), 400
+
+    posti = Posto.query.options(
+        joinedload(Posto.prenotazione).joinedload(Prenotazione.utente)
+    ).filter_by(evento_id=event_id).all()
+
+    matched = []
+    for p in posti:
+        if p.prenotazione:
+            utente = p.prenotazione.utente
+            nome_pren = p.prenotazione.nome_prenotazione or ''
+            testo = f"{utente.nome_cognome} {utente.email} {utente.username} {nome_pren} {p.fila}{p.colonna}".lower()
+            if search in testo:
+                matched.append({
+                    'id': p.id,
+                    'fila': p.fila,
+                    'colonna': p.colonna,
+                    'stato': p.stato,
+                    'utente': utente.nome_cognome,
+                    'email': utente.email,
+                    'nome_prenotazione': nome_pren
+                })
+
+    return jsonify({'matched': matched, 'count': len(matched), 'search': search})
 
 # ==================== GUIDA ====================
 

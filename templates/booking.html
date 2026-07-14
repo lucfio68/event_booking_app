@@ -223,6 +223,12 @@ let selectedSeats = [];
 let selectedToDelete = [];
 let azioneCorrente = null;
 
+function parseCorridoi(str) {
+    if (!str || str === '') return [];
+    if (Array.isArray(str)) return str;
+    return str.split(',').map(function(x) { return parseInt(x.trim(), 10); }).filter(function(x) { return !isNaN(x); });
+}
+
 function loadSeats() {
     fetch(`/api/seats/${EVENTO_ID}`)
         .then(r => r.json())
@@ -235,67 +241,117 @@ function renderSeats(posti) {
     const container = document.getElementById('seats-container');
     if (!posti.length) { container.innerHTML = '<p>Nessun posto disponibile.</p>'; return; }
 
+    // Ottieni info corridoi
+    const corrCol = parseCorridoi(posti[0] && posti[0].corridoio_colonne);
+    const corrFile = parseCorridoi(posti[0] && posti[0].corridoio_file);
+
     const colonne = Math.max(...posti.map(p => p.colonna));
-    container.style.gridTemplateColumns = `repeat(${colonne}, 50px)`;
+    const file = Math.max(...posti.map(p => p.fila.charCodeAt(0) - 64));
 
-    container.innerHTML = posti.map(p => {
-        let cls = '';
-        let nome = p.nome_prenotazione || '';
-        let label = '';
-        let cancellabile = false;
-        let cliccabile = false;
+    // Crea mappa posizione -> posto
+    const postoMap = {};
+    posti.forEach(p => {
+        postoMap[p.fila + '-' + p.colonna] = p;
+    });
 
-        if (p.stato === 'libero') {
-            cls = 'libero';
-            cliccabile = true;
-        } else if (p.stato === 'abbonato') {
-            if (IS_ADMIN) {
-                cls = 'abbonato-admin';
-                cancellabile = true;
-                cliccabile = true;
-            } else {
-                cls = 'abbonato';
-                cancellabile = false;
-                cliccabile = false;
+    // Rendi il container flex column per le righe
+    container.style.display = 'flex';
+    container.style.flexDirection = 'column';
+    container.style.alignItems = 'center';
+    container.style.gap = '0';
+
+    let html = '';
+
+    for (let f = 1; f <= file; f++) {
+        const filaLettera = String.fromCharCode(64 + f);
+
+        html += `<div class="seat-row" style="display:flex; gap:8px; align-items:center; margin-bottom:4px;">`;
+        html += `<div style="width:32px; text-align:center; font-weight:bold; color:#475569; font-size:0.9em;">${filaLettera}</div>`;
+
+        for (let c = 1; c <= colonne; c++) {
+            const p = postoMap[filaLettera + '-' + c];
+            if (!p) {
+                // Spazio vuoto (non dovrebbe succedere)
+                html += `<div style="width:50px; height:50px;"></div>`;
+                continue;
             }
-            nome = nome || 'Abbonato';
-        } else if (p.stato === 'riservato') {
-            if (IS_ADMIN) {
-                cls = 'riservato-admin';
-                cancellabile = true;
+
+            let cls = '';
+            let nome = p.nome_prenotazione || '';
+            let label = '';
+            let cancellabile = false;
+            let cliccabile = false;
+
+            if (p.stato === 'libero') {
+                cls = 'libero';
                 cliccabile = true;
-            } else {
-                cls = 'riservato';
-                cancellabile = false;
-                cliccabile = false;
+            } else if (p.stato === 'abbonato') {
+                if (IS_ADMIN) {
+                    cls = 'abbonato-admin';
+                    cancellabile = true;
+                    cliccabile = true;
+                } else {
+                    cls = 'abbonato';
+                    cancellabile = false;
+                    cliccabile = false;
+                }
+                nome = nome || 'Abbonato';
+            } else if (p.stato === 'riservato') {
+                if (IS_ADMIN) {
+                    cls = 'riservato-admin';
+                    cancellabile = true;
+                    cliccabile = true;
+                } else {
+                    cls = 'riservato';
+                    cancellabile = false;
+                    cliccabile = false;
+                }
+                nome = nome || 'Riservato';
+            } else if (p.stato === 'prenotato') {
+                if (p.is_mio) {
+                    cls = 'mio';
+                    cancellabile = true;
+                    cliccabile = true;
+                } else if (IS_ADMIN) {
+                    cls = 'admin-canc';
+                    cancellabile = true;
+                    cliccabile = true;
+                } else {
+                    cls = 'prenotato-altri';
+                    cancellabile = false;
+                    cliccabile = false;
+                    nome = 'Occupato';
+                }
             }
-            nome = nome || 'Riservato';
-        } else if (p.stato === 'prenotato') {
-            if (p.is_mio) {
-                cls = 'mio';
-                cancellabile = true;
-                cliccabile = true;
-            } else if (IS_ADMIN) {
-                cls = 'admin-canc';
-                cancellabile = true;
-                cliccabile = true;
-            } else {
-                cls = 'prenotato-altri';
-                cancellabile = false;
-                cliccabile = false;
-                nome = 'Occupato';
+
+            if (nome && cls !== 'prenotato-altri') {
+                label = `<div class="nome-pren">${nome}</div>`;
+            }
+
+            html += `<div class="seat ${cls}" data-id="${p.id}" data-stato="${p.stato}" data-canc="${cancellabile}" data-clic="${cliccabile}" onclick="toggleSeat(this)">
+                <div>${p.fila}${p.colonna}</div>
+                ${label}
+            </div>`;
+
+            // Corridoio verticale DOPO la colonna (se specificato)
+            if (corrCol.includes(c)) {
+                html += `<div class="corridoio-col" style="width:20px; height:50px; display:flex; align-items:center; justify-content:center;">
+                    <div style="width:8px; height:80%; background: repeating-linear-gradient(0deg, #e2e8f0, #e2e8f0 6px, #f1f5f9 6px, #f1f5f9 12px); border-radius:4px; opacity:0.6;"></div>
+                </div>`;
             }
         }
 
-        if (nome && cls !== 'prenotato-altri') {
-            label = `<div class="nome-pren">${nome}</div>`;
-        }
+        html += `</div>`;
 
-        return `<div class="seat ${cls}" data-id="${p.id}" data-stato="${p.stato}" data-canc="${cancellabile}" data-clic="${cliccabile}" onclick="toggleSeat(this)">
-            <div>${p.fila}${p.colonna}</div>
-            ${label}
-        </div>`;
-    }).join('');
+        // Corridoio orizzontale DOPO la fila (se specificato)
+        if (corrFile.includes(f)) {
+            html += `<div class="corridoio-row" style="width:100%; height:24px; display:flex; align-items:center; justify-content:center; margin:4px 0;">
+                <div style="width:80%; height:12px; background: repeating-linear-gradient(90deg, #e2e8f0, #e2e8f0 8px, #f1f5f9 8px, #f1f5f9 16px); border-radius:6px; opacity:0.6;"></div>
+            </div>`;
+        }
+    }
+
+    container.innerHTML = html;
 
     selectedSeats = [];
     selectedToDelete = [];

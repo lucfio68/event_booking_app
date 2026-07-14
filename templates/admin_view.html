@@ -2,8 +2,15 @@
 {% block title %}Gestione Evento - {{ evento.nome }}{% endblock %}
 {% block content %}
 <div class="admin-container">
-    <h2>Gestione Evento: {{ evento.nome }}</h2>
-    <p><strong>Data:</strong> {{ evento.data_evento.strftime('%d/%m/%Y') }} | <strong>Sala:</strong> {{ evento.sala.nome }}</p>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
+        <div>
+            <h2>Gestione Evento: {{ evento.nome }}</h2>
+            <p><strong>Data:</strong> {{ evento.data_evento.strftime('%d/%m/%Y') }} | <strong>Sala:</strong> {{ evento.sala.nome }}</p>
+        </div>
+        <button id="btnDeleteEvent" data-event-id="{{ evento.id }}" data-event-name="{{ evento.nome }}" class="btn btn-danger" style="background:#dc2626;">
+            🗑️ Elimina Evento
+        </button>
+    </div>
 
     <div class="search-box">
         <form method="GET" action="{{ url_for('admin_event_view', event_id=evento.id) }}">
@@ -15,6 +22,12 @@
 
     <div class="seats-layout-admin">
         <h3>Layout Sala</h3>
+        <div class="search-box" style="margin-bottom:15px; display:flex; gap:10px; align-items:center;">
+            <input type="text" id="seatSearchInput" placeholder="Cerca posti per nome, email, username..." class="form-control" style="max-width:400px;">
+            <button onclick="searchSeats()" class="btn btn-primary">Cerca</button>
+            <button onclick="clearSeatSearch()" class="btn btn-secondary">Reset</button>
+            <span id="seatSearchResults" style="color:#666; font-size:0.9em;"></span>
+        </div>
         <div id="adminSeatsContainer" class="seats-container">
             <p>Caricamento posti...</p>
         </div>
@@ -68,6 +81,12 @@
 (function() {
     var EVENT_ID = {{ evento.id }};
 
+    function parseCorridoi(str) {
+        if (!str || str === '') return [];
+        if (Array.isArray(str)) return str;
+        return str.split(',').map(function(x) { return parseInt(x.trim(), 10); }).filter(function(x) { return !isNaN(x); });
+    }
+
     function loadSeats() {
         var container = document.getElementById('adminSeatsContainer');
         if (!container) return;
@@ -79,18 +98,8 @@
                 return resp.json();
             })
             .then(function(seatsData) {
-                if (window.SeatRenderer) {
-                    SeatRenderer.render('adminSeatsContainer', seatsData, {
-                        isAdmin: true,
-                        onSeatClick: function(seat) {
-                            if (seat.prenotazione_id) {
-                                viewPrenotazione(seat.prenotazione_id);
-                            }
-                        }
-                    });
-                } else {
-                    renderFallback(seatsData);
-                }
+                // Usa sempre renderFallback per supportare corridoi
+                renderFallback(seatsData);
             })
             .catch(function(e) {
                 container.innerHTML = '<p class="text-danger">Errore caricamento posti.</p>';
@@ -104,18 +113,31 @@
             container.innerHTML = '<p style="text-align:center;padding:20px;color:#7f8c8d;">Nessun posto trovato.</p>';
             return;
         }
+
+        // Ottieni info corridoi
+        var corrCol = parseCorridoi(seatsData[0] && seatsData[0].corridoio_colonne);
+        var corrFile = parseCorridoi(seatsData[0] && seatsData[0].corridoio_file);
+
+        // Calcola numero totale di colonne visuali (posti + corridoi)
         var maxCol = 0;
         for (var i = 0; i < seatsData.length; i++) {
             if (seatsData[i].colonna > maxCol) maxCol = seatsData[i].colonna;
         }
+        var visualCols = maxCol + corrCol.length;
+
+        // Header colonne
         var headerRow = document.createElement('div');
         headerRow.className = 'seat-row';
         headerRow.innerHTML = '<div class="row-label"></div>';
         for (var c = 1; c <= maxCol; c++) {
             headerRow.innerHTML += '<div class="seat col-label">' + c + '</div>';
+            if (corrCol.indexOf(c) !== -1) {
+                headerRow.innerHTML += '<div class="corridoio-col-header" style="width:20px;"></div>';
+            }
         }
         container.appendChild(headerRow);
 
+        // Raggruppa posti per fila
         var rows = {};
         for (var j = 0; j < seatsData.length; j++) {
             var s = seatsData[j];
@@ -126,32 +148,69 @@
         var filaKeys = Object.keys(rows).sort();
         for (var f = 0; f < filaKeys.length; f++) {
             var fila = filaKeys[f];
+            var filaNum = f + 1;
+
             var rowDiv = document.createElement('div');
             rowDiv.className = 'seat-row';
             rowDiv.innerHTML = '<div class="row-label">' + fila + '</div>';
 
             rows[fila].sort(function(a, b) { return a.colonna - b.colonna; });
-            for (var k = 0; k < rows[fila].length; k++) {
-                var seat = rows[fila][k];
-                var seatDiv = document.createElement('div');
-                var classes = ['seat', seat.stato];
-                if (seat.utente) classes.push('admin-name');
 
-                seatDiv.className = classes.join(' ');
-                seatDiv.textContent = seat.utente ? seat.utente.substring(0, 6) : seat.colonna;
-                seatDiv.title = seat.utente 
-                    ? 'Fila ' + seat.fila + ' Col ' + seat.colonna + ' - ' + seat.utente
-                    : 'Fila ' + seat.fila + ' Col ' + seat.colonna + ' - Libero';
-
-                if (seat.prenotazione_id) {
-                    seatDiv.style.cursor = 'pointer';
-                    (function(pid) {
-                        seatDiv.addEventListener('click', function() { viewPrenotazione(pid); });
-                    })(seat.prenotazione_id);
+            for (var c = 1; c <= maxCol; c++) {
+                var seat = null;
+                for (var k = 0; k < rows[fila].length; k++) {
+                    if (rows[fila][k].colonna === c) { seat = rows[fila][k]; break; }
                 }
-                rowDiv.appendChild(seatDiv);
+
+                if (seat) {
+                    var seatDiv = document.createElement('div');
+                    var classes = ['seat', seat.stato];
+                    if (seat.utente) classes.push('admin-name');
+                    seatDiv.className = classes.join(' ');
+                    seatDiv.setAttribute('data-id', seat.id);
+                    seatDiv.setAttribute('data-fila', seat.fila);
+                    seatDiv.setAttribute('data-colonna', seat.colonna);
+                    seatDiv.textContent = seat.utente ? seat.utente.substring(0, 6) : seat.colonna;
+                    seatDiv.title = seat.utente ? ('Fila ' + seat.fila + ' Col ' + seat.colonna + ' - ' + seat.utente) : ('Fila ' + seat.fila + ' Col ' + seat.colonna + ' - Libero');
+                    if (seat.prenotazione_id) {
+                        seatDiv.style.cursor = 'pointer';
+                        (function(pid) {
+                            seatDiv.addEventListener('click', function() { viewPrenotazione(pid); });
+                        })(seat.prenotazione_id);
+                    }
+                    rowDiv.appendChild(seatDiv);
+                } else {
+                    var emptyDiv = document.createElement('div');
+                    emptyDiv.style.width = '48px';
+                    emptyDiv.style.height = '48px';
+                    rowDiv.appendChild(emptyDiv);
+                }
+
+                if (corrCol.indexOf(c) !== -1) {
+                    var corrDiv = document.createElement('div');
+                    corrDiv.style.width = '20px';
+                    corrDiv.style.height = '48px';
+                    corrDiv.style.display = 'flex';
+                    corrDiv.style.alignItems = 'center';
+                    corrDiv.style.justifyContent = 'center';
+                    corrDiv.innerHTML = '<div style="width:8px; height:80%; background: repeating-linear-gradient(0deg, #e2e8f0, #e2e8f0 6px, #f1f5f9 6px, #f1f5f9 12px); border-radius:4px; opacity:0.6;"></div>';
+                    rowDiv.appendChild(corrDiv);
+                }
             }
             container.appendChild(rowDiv);
+
+            if (corrFile.indexOf(filaNum) !== -1) {
+                var corrRow = document.createElement('div');
+                corrRow.className = 'seat-row';
+                corrRow.style.width = '100%';
+                corrRow.style.height = '24px';
+                corrRow.style.display = 'flex';
+                corrRow.style.alignItems = 'center';
+                corrRow.style.justifyContent = 'center';
+                corrRow.style.margin = '4px 0';
+                corrRow.innerHTML = '<div style="width:80%; height:12px; background: repeating-linear-gradient(90deg, #e2e8f0, #e2e8f0 8px, #f1f5f9 8px, #f1f5f9 16px); border-radius:6px; opacity:0.6;"></div>';
+                container.appendChild(corrRow);
+            }
         }
     }
 
@@ -188,5 +247,91 @@ function viewPrenotazione(id) {
 function closeModal() {
     document.getElementById('prenotazioneModal').style.display = 'none';
 }
+
+
+// ==================== RICERCA POSTI ====================
+let lastSearchResults = [];
+
+function searchSeats() {
+    const input = document.getElementById('seatSearchInput');
+    const q = input.value.trim();
+    if (!q) return;
+
+    const resultsSpan = document.getElementById('seatSearchResults');
+    resultsSpan.textContent = 'Ricerca in corso...';
+
+    fetch('/api/seats/search/' + EVENT_ID + '?q=' + encodeURIComponent(q))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                resultsSpan.textContent = 'Errore: ' + data.error;
+                return;
+            }
+            lastSearchResults = data.matched.map(function(m) { return m.id; });
+            resultsSpan.textContent = 'Trovati: ' + data.count + ' posti';
+            highlightSeats(lastSearchResults);
+        })
+        .catch(function(e) {
+            resultsSpan.textContent = 'Errore di rete';
+        });
+}
+
+function clearSeatSearch() {
+    document.getElementById('seatSearchInput').value = '';
+    document.getElementById('seatSearchResults').textContent = '';
+    lastSearchResults = [];
+    highlightSeats([]);
+}
+
+function highlightSeats(seatIds) {
+    // Rimuovi evidenziamenti precedenti
+    document.querySelectorAll('.seat.search-highlight').forEach(function(el) {
+        el.classList.remove('search-highlight');
+    });
+
+    // Applica nuovi evidenziamenti
+    seatIds.forEach(function(id) {
+        const el = document.querySelector('.seat[data-id="' + id + '"]');
+        if (el) el.classList.add('search-highlight');
+    });
+}
+
+// Enter per cercare
+document.getElementById('seatSearchInput').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') searchSeats();
+});
+
+function deleteEventAdmin(eventId, eventName) {
+    if (!confirm("Sei sicuro di voler eliminare l'evento '" + eventName + "'?\n\nVerranno eliminate anche tutte le prenotazioni associate.\nQuesta azione non può essere annullata.")) {
+        return;
+    }
+
+    fetch('/api/event/delete/' + eventId, { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                alert('Evento eliminato con successo!');
+                window.location.href = '/calendar';
+            } else {
+                alert('Errore: ' + (data.error || 'Impossibile eliminare'));
+            }
+        })
+        .catch(function(e) {
+            alert('Errore di rete durante eliminazione');
+        });
+}
+
+// Attach event listener to delete button
+document.addEventListener('DOMContentLoaded', function() {
+    var btn = document.getElementById('btnDeleteEvent');
+    if (btn) {
+        btn.addEventListener('click', function() {
+            deleteEventAdmin(
+                parseInt(this.dataset.eventId),
+                this.dataset.eventName
+            );
+        });
+    }
+});
 </script>
 {% endblock %}

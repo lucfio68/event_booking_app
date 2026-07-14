@@ -55,5 +55,18 @@ git remote add origin https://github.com/lucfio68/event_booking_app.git
 git branch -M main
 git push -u origin main
 
+forza sovrascrittura sul remoto
+git push -f origin main
+
+======================================
+#operatività normale:
+
+git pull origin main
+# ... do your work ...
+git add .
+git commit -m "Your changes"
+git push origin main
+======================================
+
 $env:FLASK_ENV="development"
 python app.py

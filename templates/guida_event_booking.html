@@ -289,7 +289,7 @@
 <header>
     <h1>📖 Guida EventBooking</h1>
     <p>Manuale completo per utenti e amministratori</p>
-    <span class="version-badge">v1.2</span>
+    <span class="version-badge">v1.3</span>
     <button class="credits-btn" onclick="openCredits()">❤️ Credits</button>
 </header>
 
@@ -314,6 +314,7 @@
         <li><a href="#admin-prenotazioni">3.7 Gestione Prenotazioni</a></li>
         <li><a href="#admin-ricerca">3.8 Ricerca e Filtri</a></li>
         <li><a href="#admin-abbonato">3.9 Posti Abbonato</a></li>
+        <li><a href="#admin-cancella">3.10 Cancellare Prenotazioni</a></li>
         <li><a href="#schema">4. Schema Database</a></li>
         <li><a href="#faq">5. FAQ e Troubleshooting</a></li>
         <li><a href="#changelog">6. Changelog</a></li>
@@ -829,10 +830,39 @@ with app.app_context():
                 <li><strong>Bianco</strong>: Libero</li>
                 <li><strong>Arancione</strong>: Riservato</li>
                 <li><strong>Azzurro</strong>: Prenotato</li>
+                <li><strong>Viola</strong>: Abbonato</li>
+                <li><strong>Giallo lampeggiante</strong>: Risultato ricerca</li>
             </ul>
             <p>Sui posti azzurri apparira' il <strong>nome abbreviato</strong> dell'utente.</p>
         </div>
     </div>
+    <h3>Ricerca posti nella sala</h3>
+    <p>Nella pagina di gestione evento, sopra il layout della sala, è presente una barra di ricerca che permette di <strong>evidenziare visivamente</strong> i posti che corrispondono al termine cercato.</p>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Inserisci il termine di ricerca</h4>
+            <p>Digita un nome, email, username o nome prenotazione nella barra sopra la mappa dei posti.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Clicca "Cerca" o premi Enter</h4>
+            <p>I posti corrispondenti verranno evidenziati con un <strong>anello giallo lampeggiante</strong> e ingranditi per facile individuazione.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Reset</h4>
+            <p>Clicca <strong>Reset</strong> per rimuovere l'evidenziamento e tornare alla visualizzazione normale.</p>
+        </div>
+    </div>
+    <div class="alert alert-info">
+        <strong>Campi ricercabili:</strong> nome cognome, email, username, nome prenotazione, fila e colonna del posto (es. "A1").
+    </div>
+
     <h3>Dettagli di una singola prenotazione</h3>
     <p>Clicca su un posto azzurro per aprire un modale con:</p>
     <ul>
@@ -920,6 +950,70 @@ with app.app_context():
 
     <div class="alert alert-info">
         <strong>Nota:</strong> I posti abbonato condividono la logica dei posti riservati ma usano lo stato <code>abbonato</code> nel database e il colore <code>#8b5cf6</code> (viola) nell'interfaccia.
+    </div>
+</div>
+
+<div class="section" id="admin-cancella">
+    <h2><span class="badge badge-admin">Admin</span> 3.10 Cancellare Prenotazioni</h2>
+    <p>Gli amministratori possono cancellare posti prenotati, riservati o abbonati direttamente dalla mappa della sala.</p>
+
+    <h3>Procedura di cancellazione</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Accedi alla pagina di prenotazione</h4>
+            <p>Dal calendario, clicca su <strong>Prenota</strong> per l'evento desiderato (anche come admin).</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Seleziona i posti da cancellare</h4>
+            <p>Clicca sui posti <strong>azzurri</strong> (prenotati), <strong>arancioni</strong> (riservati) o <strong>viola</strong> (abbonati) che vuoi cancellare.</p>
+            <p>I posti selezionati per la cancellazione diventeranno <strong>rossi lampeggianti</strong> con un'animazione pulsante.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Conferma la cancellazione</h4>
+            <p>Clicca il pulsante <strong>🗑️ Cancella Selezionati</strong>. Apparirà una finestra di conferma con il numero di posti da cancellare.</p>
+            <p>Se stai cancellando sia posti prenotati che riservati, il messaggio indicherà la suddivisione.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            <h4>Notifiche email</h4>
+            <p>Dopo la cancellazione, l'utente proprietario della prenotazione riceverà un'email di notifica con:</p>
+            <ul>
+                <li>Nome dell'evento e data</li>
+                <li>Posti cancellati (es. A1, A2, B3)</li>
+                <li>Nome dell'amministratore che ha effettuato l'operazione</li>
+            </ul>
+            <p>Gli altri amministratori della sala riceveranno una notifica email della cancellazione.</p>
+        </div>
+    </div>
+
+    <h3>Cancellare un evento completo</h3>
+    <p>Nella pagina di <strong>Gestione Evento</strong> o nel modale del calendario (doppio click su data), gli admin possono eliminare l'intero evento:</p>
+    <div class="alert alert-danger">
+        <strong>Attenzione:</strong> L'eliminazione di un evento cancella <strong>tutte</strong> le prenotazioni associate e i posti. Questa azione è irreversibile.
+    </div>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Clicca "Elimina Evento"</h4>
+            <p>Nella pagina di gestione o nel modale del calendario, clicca il pulsante rosso <strong>🗑️ Elimina Evento</strong>.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Conferma</h4>
+            <p>Apparirà un messaggio di conferma. Clicca <strong>OK</strong> per procedere.</p>
+            <p>L'evento e tutte le prenotazioni associate verranno rimosse definitivamente.</p>
+        </div>
     </div>
 </div>
 
@@ -1065,8 +1159,19 @@ with app.app_context():
 <div class="section" id="changelog">
     <h2>📝 6. Changelog</h2>
 
+    <h3>v1.3 (2026)</h3>
+    <ul>
+        <li><strong>Fix:</strong> Corretta visualizzazione corridoi nella mappa sala — i corridoi verticali e orizzontali vengono ora renderizzati nella posizione corretta (dopo la fila/colonna specificata)</li>
+        <li><strong>Fix:</strong> Parsing robusto dei dati corridoi lato server con gestione errori (try/except)</li>
+        <li><strong>Fix:</strong> Risolto errore JavaScript "Invalid or unexpected token" nella pagina di gestione evento (admin) causato da stringhe multilinea nel confirm()</li>
+        <li><strong>Fix:</strong> L'API <code>/api/seats</code> ora restituisce correttamente i dati dei corridoi per ogni posto</li>
+        <li><strong>Fix:</strong> La creazione evento salva correttamente i campi <code>corridoio_colonne</code> e <code>corridoio_file</code> nel database</li>
+        <li><strong>Update:</strong> Guida aggiornata con sezione Cancellazione Prenotazioni e Changelog v1.3</li>
+    </ul>
+
     <h3>v1.2 (2026)</h3>
     <ul>
+        <li><strong>Nuovo:</strong> Ricerca posti nella mappa sala — evidenzia posti per nome, email, username (anello giallo lampeggiante)</li>
         <li><strong>Nuovo:</strong> Posti "Abbonato" — tipologia di posto riservato gestibile solo da admin, colore viola</li>
         <li><strong>Nuovo:</strong> Pulsante "🎫 Abbona Posti" nella pagina di prenotazione (solo admin)</li>
         <li><strong>Fix:</strong> Rimosso <code>with_for_update()</code> dalle query per compatibilità con Neon PostgreSQL in modalità read-only</li>
@@ -1090,7 +1195,7 @@ with app.app_context():
 </div>
 
 <footer>
-    <p>📘 Guida EventBooking v1.2</p>
+    <p>📘 Guida EventBooking v1.3</p>
     <p>Per supporto, aggiornamenti o segnalazione bug, contatta l'amministratore di sistema.</p>
     <p style="margin-top:10px;"><a href="#" onclick="openCredits(); return false;" style="color:var(--accent);">Credits</a></p>
 </footer>

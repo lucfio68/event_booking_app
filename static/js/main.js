@@ -104,6 +104,10 @@ window.SeatRenderer = {
                     ? seat.utente.substring(0, 6) 
                     : (seat.is_mio ? 'TUO' : seat.colonna);
 
+                seatDiv.setAttribute('data-id', seat.id);
+                seatDiv.setAttribute('data-fila', seat.fila);
+                seatDiv.setAttribute('data-colonna', seat.colonna);
+
                 seatDiv.title = seat.utente 
                     ? 'Fila ' + seat.fila + ' Col ' + seat.colonna + ' - ' + seat.utente
                     : 'Fila ' + seat.fila + ' Col ' + seat.colonna + ' - ' + seat.stato;

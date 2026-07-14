@@ -418,3 +418,112 @@ body {
 .btn-guide:hover {
     background: #2980b9;
 }
+
+
+
+
+/* === RICERCA NOME PRENOTAZIONE - EVIDENZIAZIONE POSTI === */
+
+/* Evidenziazione base - anello dorato intorno al posto */
+.seat.search-highlight {
+    animation: search-pulse 1.2s infinite alternate !important;
+    box-shadow: 0 0 0 4px #f59e0b, 0 0 15px rgba(245, 158, 11, 0.6) !important;
+    z-index: 50;
+    transform: scale(1.15);
+}
+
+/* Posto con focus attivo (quando ci scrolli sopra) - lampeggio intenso */
+.seat.search-focus {
+    animation: search-focus-pulse 0.8s infinite alternate !important;
+    box-shadow: 0 0 0 5px #ef4444, 0 0 25px rgba(239, 68, 68, 0.8) !important;
+    z-index: 100;
+    transform: scale(1.25);
+}
+
+@keyframes search-pulse {
+    from { 
+        box-shadow: 0 0 0 3px #fbbf24, 0 0 10px rgba(251, 191, 36, 0.5);
+        transform: scale(1.1);
+    }
+    to { 
+        box-shadow: 0 0 0 5px #f59e0b, 0 0 20px rgba(245, 158, 11, 0.8);
+        transform: scale(1.2);
+    }
+}
+
+@keyframes search-focus-pulse {
+    from { 
+        box-shadow: 0 0 0 4px #ef4444, 0 0 15px rgba(239, 68, 68, 0.6);
+        transform: scale(1.2);
+    }
+    to { 
+        box-shadow: 0 0 0 6px #dc2626, 0 0 30px rgba(220, 38, 38, 0.9);
+        transform: scale(1.3);
+    }
+}
+
+/* Pannello risultati ricerca */
+#searchResultsPanel {
+    transition: all 0.3s ease;
+}
+
+#searchResultsList button:hover {
+    background: #fde68a !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+/* Indicatore nome prenotazione sul posto */
+.seat[data-nome-pren]::after {
+    content: attr(data-nome-pren);
+    position: absolute;
+    bottom: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.6em;
+    white-space: nowrap;
+    background: #f59e0b;
+    color: white;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: bold;
+    z-index: 200;
+    pointer-events: none;
+}
+
+
+/* === CORRIDOI === */
+.corridoio-row {
+    width: 100%;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 4px 0;
+}
+.corridoio-h {
+    width: 80%;
+    height: 12px;
+    background: repeating-linear-gradient(90deg, #e2e8f0, #e2e8f0 8px, #f1f5f9 8px, #f1f5f9 16px);
+    border-radius: 6px;
+    opacity: 0.6;
+}
+.corridoio-v {
+    width: 20px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.corridoio-v::before {
+    content: '';
+    width: 8px;
+    height: 80%;
+    background: repeating-linear-gradient(0deg, #e2e8f0, #e2e8f0 6px, #f1f5f9 6px, #f1f5f9 12px);
+    border-radius: 4px;
+    opacity: 0.6;
+}
+.corridoio-col-header {
+    width: 20px;
+    height: 32px;
+}

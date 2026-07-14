@@ -164,7 +164,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <h4>${ev.nome}</h4>
                     <p>Ora: ${ev.ora} | Sala: ${ev.sala}</p>
                     <a href="/booking/${ev.id}" class="btn btn-success btn-sm">Prenota</a>
-                    ${isAdmin ? `<a href="/admin/event/${ev.id}" class="btn btn-info btn-sm">Gestisci</a>` : ''}
+                    ${isAdmin ? `<a href="/admin/event/${ev.id}" class="btn btn-info btn-sm">Gestisci</a><button class="btn btn-danger btn-sm btn-delete-event" data-event-id="${ev.id}" data-event-name="${ev.nome.replace(/"/g, '&quot;')}" style="margin-left:5px;">Elimina</button>` : ''}
                 </div>
             `;
         }
@@ -177,4 +177,33 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     init();
+
+    // Setup delete event buttons in modal
+    document.getElementById("dayEventsList").addEventListener("click", function(e) {
+        var btn = e.target.closest(".btn-delete-event");
+        if (!btn) return;
+        var eventId = btn.dataset.eventId;
+        var eventName = btn.dataset.eventName;
+        deleteEventJs(parseInt(eventId), eventName);
+    });
 });
+
+function deleteEventJs(eventId, eventName) {
+    if (!confirm("Eliminare evento: " + eventName + "?\n\nVerranno eliminate tutte le prenotazioni.\nOperazione irreversibile.")) {
+        return;
+    }
+    fetch("/api/event/delete/" + eventId, {method: "POST"})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                alert("Evento eliminato!");
+                document.getElementById("dayEventsModal").style.display = "none";
+                location.reload();
+            } else {
+                alert("Errore: " + (data.error || "Eliminazione fallita"));
+            }
+        })
+        .catch(function(e) {
+            alert("Errore di rete");
+        });
+}
