@@ -4,6 +4,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#e94560">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="EventBooking">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192x192.png">
     <title>{% block title %}Event Booking{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
@@ -41,5 +47,15 @@
 
     <script src="{{ url_for('static', filename='js/main.js') }}?v=2"></script>
     {% block scripts %}{% endblock %}
+<script>
+    // Registra Service Worker per PWA
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/static/service-worker.js')
+                .then(function(reg) { console.log('SW registrato:', reg.scope); })
+                .catch(function(err) { console.log('SW errore:', err); });
+        });
+    }
+</script>
 </body>
 </html>
