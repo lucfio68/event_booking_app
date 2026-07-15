@@ -31,11 +31,17 @@ mail = Mail(app)
 # ==================== EMAIL FALLBACK (SMTP → Resend API) ====================
 
 def _extract_email(raw):
-    """Estrae l'indirizzo email da stringhe tipo 'Nome <email@dom.com>'."""
-    if not raw:
-        return 'noreply@eventbooking.com'
+    """Estrae l'indirizzo email da stringhe tipo 'Nome <email@dom.com>'.
+    Restituisce None se il formato non è valido."""
+    if not raw or not isinstance(raw, str):
+        return None
+    raw = raw.strip()
     m = re.search(r'<([^>]+)>', raw)
-    return m.group(1).strip() if m else raw.strip()
+    email = m.group(1).strip() if m else raw
+    # Validazione base email
+    if '@' not in email or '.' not in email.split('@')[-1]:
+        return None
+    return email
 
 def _is_network_error(e):
     """Riconosce errori di rete comuni su Render free tier."""
@@ -73,8 +79,20 @@ def send_email_message(msg):
 
         try:
             import requests
+            # Resend richiede un dominio verificato. Usa RESEND_FROM_EMAIL se configurato,
+            # altrimenti fallback su onboarding@resend.dev (indirizzo di test Resend)
+            resend_from = app.config.get('RESEND_FROM_EMAIL')
+            if not resend_from:
+                # Estrai dal sender originale, ma se il dominio è fittizio usa il default Resend
+                extracted = _extract_email(msg.sender or app.config.get('MAIL_DEFAULT_SENDER'))
+                if extracted and extracted.split('@')[-1] not in ('resend.dev',):
+                    # Se il dominio non è verificato su Resend, usa il fallback
+                    resend_from = 'onboarding@resend.dev'
+                else:
+                    resend_from = extracted or 'onboarding@resend.dev'
+
             payload = {
-                "from": _extract_email(msg.sender or app.config.get('MAIL_DEFAULT_SENDER')),
+                "from": resend_from,
                 "to": msg.recipients if isinstance(msg.recipients, list) else [msg.recipients],
                 "subject": msg.subject,
                 "text": msg.body or ''

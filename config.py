@@ -17,4 +17,5 @@ class Config:
     MAIL_USERNAME = os.environ.get('MAIL_USERNAME') or 'your-email@gmail.com'
     MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD') or 'your-app-password'
     MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER')
-    RESEND_API_KEY = os.environ.get('RESEND_API_KEY') or '' or 'EventBooking <x3me.over@gmail.com.com>'
+    RESEND_API_KEY = os.environ.get('RESEND_API_KEY') or ''
+    RESEND_FROM_EMAIL = os.environ.get('RESEND_FROM_EMAIL') or 'onboarding@resend.dev' or 'EventBooking <x3me.over@gmail.com.com>'
