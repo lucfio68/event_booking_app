@@ -56,15 +56,32 @@ def verify_reset_token(token, max_age=3600):
     except Exception:
         return None
 
-def send_email_async(app, fn, *args, **kwargs):
-    """Esegue l'invio email in un thread separato per non bloccare la risposta HTTP.
-    Essenziale su Render dove SMTP può andare in timeout."""
+def send_email_async(app, fn_name, **kwargs):
+    """Invia email in un thread separato con una NUOVA sessione SQLAlchemy.
+    Non passa mai oggetti ORM tra thread (solo ID primitivi)."""
     def task():
         with app.app_context():
             try:
-                fn(*args, **kwargs)
+                if fn_name == 'confirmation':
+                    evento = db.session.get(Evento, kwargs['evento_id'])
+                    utente = db.session.get(Utente, kwargs['utente_id'])
+                    posti = db.session.query(Posto).filter(Posto.id.in_(kwargs['posti_ids'])).all() if kwargs.get('posti_ids') else []
+                    if evento and utente:
+                        send_confirmation_email(evento, utente, posti, kwargs.get('nome_prenotazione'))
+
+                elif fn_name == 'cancellation':
+                    evento = db.session.get(Evento, kwargs['evento_id'])
+                    utente = db.session.get(Utente, kwargs['utente_id'])
+                    if evento and utente:
+                        send_cancellation_email(
+                            evento, utente, kwargs['posti_str'],
+                            kwargs.get('prenotazione_eliminata', False),
+                            kwargs.get('nome_prenotazione')
+                        )
             except Exception as e:
                 app.logger.error(f'Errore invio email async: {e}')
+            finally:
+                db.session.remove()
     thread = threading.Thread(target=task)
     thread.start()
 
@@ -79,14 +96,14 @@ def send_registration_email(utente):
 
 Benvenuto su EventBooking!
 
-La tua registrazione e\' stata completata con successo.
+La tua registrazione e' stata completata con successo.
 
 Ecco i tuoi dati:
 - Username: {utente.username}
 - Email: {utente.email}
 - Nome: {utente.nome_cognome}
 
-Puoi ora accedere all\'applicazione e prenotare i posti per gli eventi.
+Puoi ora accedere all'applicazione e prenotare i posti per gli eventi.
 
 Grazie per esserti registrato!
 """
@@ -96,9 +113,8 @@ Grazie per esserti registrato!
         app.logger.error(f'Errore invio email registrazione utente: {e}')
 
 def send_registration_notify_admin(utente):
-    """Notifica all\'amministratore di una nuova registrazione."""
+    """Notifica all'amministratore di una nuova registrazione."""
     try:
-        # Cerca un admin a cui notificare (il primo trovato)
         admin = Utente.query.filter_by(tipo='admin').first()
         if admin:
             msg = Message(
@@ -113,7 +129,7 @@ Email: {utente.email}
 Cellulare: {utente.cellulare or 'Non fornito'}
 Data registrazione: {utente.data_registrazione.strftime('%d/%m/%Y %H:%M')}
 
-L\'utente puo\' ora effettuare il login e prenotare posti.
+L'utente puo' ora effettuare il login e prenotare posti.
 """
             )
             mail.send(msg)
@@ -132,7 +148,7 @@ def send_confirmation_email(evento, utente, posti, nome_prenotazione=None):
         sender='EventBooking <noreply@event_booking.com>',
         body=f"""Ciao {display_name},
 
-La tua prenotazione per l\'evento "{evento.nome}" e\' stata confermata.
+La tua prenotazione per l'evento "{evento.nome}" e' stata confermata.
 
 Data: {evento.data_evento.strftime('%d/%m/%Y')}
 Ora: {evento.ora_inizio.strftime('%H:%M')}
@@ -181,14 +197,14 @@ def send_cancellation_email(evento, utente, posti_str, prenotazione_eliminata=Fa
                 sender='EventBooking <noreply@event_booking.com>',
                 body=f"""Ciao {display_name},
 
-La tua prenotazione per l\'evento "{evento.nome}" e\' stata annullata (tutti i posti rimossi).
+La tua prenotazione per l'evento "{evento.nome}" e' stata annullata (tutti i posti rimossi).
 
 Data: {evento.data_evento.strftime('%d/%m/%Y')}
 Ora: {evento.ora_inizio.strftime('%H:%M')}
 Sala: {evento.sala.nome}
 Posti annullati ({num_posti}): {posti_str}
 
-Se non hai richiesto tu questa operazione, contatta l\'amministratore.
+Se non hai richiesto tu questa operazione, contatta l'amministratore.
 """
             )
         else:
@@ -198,14 +214,14 @@ Se non hai richiesto tu questa operazione, contatta l\'amministratore.
                 sender='EventBooking <noreply@event_booking.com>',
                 body=f"""Ciao {display_name},
 
-I posti {posti_str} per l\'evento "{evento.nome}" sono stati annullati.
+I posti {posti_str} per l'evento "{evento.nome}" sono stati annullati.
 
 Data: {evento.data_evento.strftime('%d/%m/%Y')}
 Ora: {evento.ora_inizio.strftime('%H:%M')}
 Sala: {evento.sala.nome}
 Posti annullati ({num_posti}): {posti_str}
 
-Se non hai richiesto tu questa operazione, contatta l\'amministratore.
+Se non hai richiesto tu questa operazione, contatta l'amministratore.
 """
             )
         mail.send(msg)
@@ -240,10 +256,10 @@ def register():
             return redirect(url_for('register'))
 
         if Utente.query.filter_by(email=email).first():
-            flash('Email gia\' registrata.', 'danger')
+            flash("Email gia' registrata.", 'danger')
             return redirect(url_for('register'))
         if Utente.query.filter_by(username=username).first():
-            flash('Username gia\' in uso.', 'danger')
+            flash("Username gia' in uso.", 'danger')
             return redirect(url_for('register'))
 
         user = Utente(nome_cognome=nome, username=username, email=email, cellulare=cellulare, tipo='user')
@@ -251,7 +267,6 @@ def register():
         db.session.add(user)
         db.session.commit()
 
-        # Invia email di conferma registrazione
         send_registration_email(user)
         send_registration_notify_admin(user)
 
@@ -288,7 +303,7 @@ def forgot_password():
         email = request.form.get('email', '').strip().lower()
         user = Utente.query.filter_by(email=email).first()
         if not user:
-            flash('Se l\'indirizzo e\' registrato, riceverai un\'email con le istruzioni.', 'info')
+            flash("Se l'indirizzo e' registrato, riceverai un'email con le istruzioni.", 'info')
             return redirect(url_for('login'))
 
         token = get_reset_token(user.email)
@@ -314,7 +329,7 @@ Se non hai richiesto tu questa operazione, ignora questa email.
             flash('Email di reset inviata! Controlla la tua casella di posta.', 'success')
         except Exception as e:
             app.logger.error(f'Errore invio email reset: {e}')
-            flash('Errore nell\'invio dell\'email. Riprova piu\' tardi.', 'danger')
+            flash("Errore nell'invio dell'email. Riprova piu' tardi.", 'danger')
         return redirect(url_for('login'))
     return render_template('forgot_password.html')
 
@@ -440,7 +455,7 @@ def create_event():
 
         posti_max = file * colonne
         if posti_max > sala.posti_max:
-            flash(f'I posti creati ({posti_max}) superano la capacita\' della sala ({sala.posti_max}).', 'danger')
+            flash(f"I posti creati ({posti_max}) superano la capacita' della sala ({sala.posti_max}).", 'danger')
             return redirect(url_for('create_event'))
 
         try:
@@ -450,7 +465,7 @@ def create_event():
             return redirect(url_for('create_event'))
 
         if data_obj < date.today():
-            flash('Non e\' possibile creare eventi nel passato.', 'danger')
+            flash("Non e' possibile creare eventi nel passato.", 'danger')
             return redirect(url_for('create_event'))
 
         try:
@@ -505,29 +520,25 @@ def api_delete_event(event_id):
         if not evento:
             return jsonify({'error': 'Evento non trovato'}), 404
 
-        # Elimina tutte le prenotazioni associate (cascade su posti)
         prenotazioni = Prenotazione.query.filter_by(evento_id=event_id).all()
         for p in prenotazioni:
-            # Libera i posti
             posti = Posto.query.filter_by(prenotazione_id=p.id).all()
             for posto in posti:
                 posto.stato = 'libero'
                 posto.prenotazione_id = None
             db.session.delete(p)
 
-        # Elimina i posti dell'evento
         posti_evento = Posto.query.filter_by(evento_id=event_id).all()
         for posto in posti_evento:
             db.session.delete(posto)
 
-        # Elimina l'evento
         db.session.delete(evento)
         db.session.commit()
 
         return jsonify({'success': True, 'message': 'Evento eliminato con successo'})
     except Exception as e:
         db.session.rollback()
-        app.logger.error(f'Errore eliminazione evento: {e}')
+        app.logger.error(f"Errore eliminazione evento: {e}")
         return jsonify({"error": "Errore interno durante l'eliminazione"}), 500
 
 # ==================== PRENOTAZIONE ====================
@@ -539,7 +550,7 @@ def booking_page(event_id):
     if not ev:
         abort(404)
     if ev.data_evento < date.today():
-        flash('Non e\' possibile prenotare eventi passati.', 'danger')
+        flash("Non e' possibile prenotare eventi passati.", 'danger')
         return redirect(url_for('calendar_view'))
     return render_template('booking.html', evento=ev)
 
@@ -551,7 +562,6 @@ def api_seats(event_id):
         joinedload(Posto.prenotazione).joinedload(Prenotazione.utente)
     ).filter_by(evento_id=event_id).order_by(Posto.fila, Posto.colonna).all()
 
-    # Parse corridoi
     corridoio_colonne = []
     if evento and evento.corridoio_colonne:
         try:
@@ -620,7 +630,7 @@ def api_book():
 
         if len(posti) != len(posti_ids):
             db.session.rollback()
-            return jsonify({'error': 'Alcuni posti non sono piu\' disponibili'}), 409
+            return jsonify({'error': "Alcuni posti non sono piu' disponibili"}), 409
 
         prenotazione = Prenotazione(
             evento_id=evento_id,
@@ -642,8 +652,14 @@ def api_book():
         app.logger.error(f'Errore prenotazione: {e}')
         return jsonify({'error': 'Errore interno durante la prenotazione'}), 500
 
-    # INVIO EMAIL IN BACKGROUND: non blocca la risposta, immune al timeout SMTP di Render
-    send_email_async(app, send_confirmation_email, evento, current_user, posti, nome_prenotazione)
+    # INVIO EMAIL IN BACKGROUND: passa solo ID primitivi, il thread crea una nuova sessione
+    send_email_async(
+        app, 'confirmation',
+        evento_id=evento.id,
+        utente_id=current_user.id,
+        posti_ids=[p.id for p in posti],
+        nome_prenotazione=nome_prenotazione
+    )
     return jsonify({'success': True, 'prenotazione_id': prenotazione.id})
 
 # ==================== RISERVA POSTI (ADMIN) ====================
@@ -672,7 +688,7 @@ def api_reserve():
 
         if len(posti) != len(posti_ids):
             db.session.rollback()
-            return jsonify({'error': 'Alcuni posti non sono piu\' disponibili'}), 409
+            return jsonify({'error': "Alcuni posti non sono piu' disponibili"}), 409
 
         prenotazione = Prenotazione(
             evento_id=evento_id,
@@ -756,7 +772,6 @@ def api_delete_seats():
         return jsonify({'error': 'Nessun posto selezionato'}), 400
 
     try:
-        # Admin puo' cancellare sia prenotati che riservati
         if current_user.is_admin():
             posti = Posto.query.filter(
                 Posto.id.in_(posto_ids),
@@ -770,7 +785,7 @@ def api_delete_seats():
 
         if len(posti) != len(posto_ids):
             db.session.rollback()
-            return jsonify({'error': 'Alcuni posti non sono piu\' disponibili per la cancellazione'}), 409
+            return jsonify({'error': "Alcuni posti non sono piu' disponibili per la cancellazione"}), 409
 
         prenotazione_ids = list(set([p.prenotazione_id for p in posti if p.prenotazione_id]))
 
@@ -818,7 +833,6 @@ def api_delete_seats():
 
         db.session.commit()
 
-        # Determina chi ha fatto l'operazione
         operatore = "Amministratore" if current_user.is_admin() else "Utente"
         operatore_nome = current_user.nome_cognome
         operatore_email = current_user.email
@@ -832,7 +846,6 @@ def api_delete_seats():
                 prenotazione_eliminata = (pren_esiste is None)
                 nome_pren = pren.nome_prenotazione
 
-                # Email all'utente proprietario della prenotazione
                 if prenotazione_eliminata:
                     num_posti = len(info['posti'])
                     label = "posto" if num_posti == 1 else "posti"
@@ -842,7 +855,7 @@ def api_delete_seats():
                         sender='EventBooking <noreply@event_booking.com>',
                         body=f"""Ciao {nome_pren or utente.nome_cognome},
 
-La tua prenotazione per l\'evento "{evento.nome}" e\' stata annullata (tutti i posti rimossi).
+La tua prenotazione per l'evento "{evento.nome}" e' stata annullata (tutti i posti rimossi).
 
 Data: {evento.data_evento.strftime('%d/%m/%Y')}
 Ora: {evento.ora_inizio.strftime('%H:%M')}
@@ -851,7 +864,7 @@ Posti annullati ({num_posti}): {', '.join([f"{p.fila}{p.colonna}" for p in info[
 
 Operazione effettuata da: {operatore} ({operatore_nome} - {operatore_email})
 
-Se non hai richiesto tu questa operazione, contatta l\'amministratore.
+Se non hai richiesto tu questa operazione, contatta l'amministratore.
 """
                     )
                 else:
@@ -864,7 +877,7 @@ Se non hai richiesto tu questa operazione, contatta l\'amministratore.
                         sender='EventBooking <noreply@event_booking.com>',
                         body=f"""Ciao {nome_pren or utente.nome_cognome},
 
-I posti {posti_rimossi} per l\'evento "{evento.nome}" sono stati annullati.
+I posti {posti_rimossi} per l'evento "{evento.nome}" sono stati annullati.
 
 Data: {evento.data_evento.strftime('%d/%m/%Y')}
 Ora: {evento.ora_inizio.strftime('%H:%M')}
@@ -873,12 +886,11 @@ Posti annullati ({num_rimossi}): {posti_rimossi}
 
 Operazione effettuata da: {operatore} ({operatore_nome} - {operatore_email})
 
-Se non hai richiesto tu questa operazione, contatta l\'amministratore.
+Se non hai richiesto tu questa operazione, contatta l'amministratore.
 """
                     )
                 mail.send(msg)
 
-                # Se l'operazione e' stata fatta da un admin, notifica anche gli altri admin
                 if current_user.is_admin() and evento.sala.email_admin:
                     admin_emails = [e.strip() for e in evento.sala.email_admin.split(',') if e.strip()]
                     if admin_emails:
@@ -896,7 +908,7 @@ Posti annullati: {', '.join([f"{p.fila}{p.colonna}" for p in info['posti']])}
 Prenotazione di: {utente.nome_cognome} ({utente.email})
 Operazione effettuata da: {operatore_nome} ({operatore_email})
 
-Questa e\' una notifica automatica.
+Questa e' una notifica automatica.
 """
                         )
                         mail.send(msg_admin)
@@ -953,8 +965,15 @@ def api_delete_booking():
         app.logger.error(f'Errore eliminazione: {e}')
         return jsonify({'error': 'Errore interno'}), 500
 
-    # Email di notifica in background (non blocca, non può causare rollback su transazione già salvata)
-    send_email_async(app, send_cancellation_email, evento, utente, posti_str, True, nome_pren)
+    # Email di notifica in background (solo ID primitivi, nuova sessione nel thread)
+    send_email_async(
+        app, 'cancellation',
+        evento_id=evento.id,
+        utente_id=utente.id,
+        posti_str=posti_str,
+        prenotazione_eliminata=True,
+        nome_prenotazione=nome_pren
+    )
     return jsonify({'success': True})
 
 # ==================== ADMIN VIEW ====================
@@ -1069,10 +1088,5 @@ def init_db():
     db.create_all()
     return 'Database inizializzato!'
 
-# Prima:
-#if __name__ == '__main__':
-#    app.run(debug=True, host='0.0.0.0', port=5000)
-
-# Dopo:
 if __name__ == '__main__':
     app.run()
