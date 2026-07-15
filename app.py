@@ -664,7 +664,7 @@ def api_book():
             Posto.id.in_(posti_ids),
             Posto.evento_id == evento_id,
             Posto.stato == 'libero'
-        ).with_for_update().all()
+        ).all()
 
         if len(posti) != len(posti_ids):
             db.session.rollback()
@@ -721,7 +721,7 @@ def api_reserve():
             Posto.id.in_(posti_ids),
             Posto.evento_id == evento_id,
             Posto.stato == 'libero'
-        ).with_for_update().all()
+        ).all()
 
         if len(posti) != len(posti_ids):
             db.session.rollback()
@@ -813,12 +813,12 @@ def api_delete_seats():
             posti = Posto.query.filter(
                 Posto.id.in_(posto_ids),
                 Posto.stato.in_(['prenotato', 'riservato', 'abbonato'])
-            ).with_for_update().all()
+            ).all()
         else:
             posti = Posto.query.filter(
                 Posto.id.in_(posto_ids),
                 Posto.stato == 'prenotato'
-            ).with_for_update().all()
+            ).all()
 
         if len(posti) != len(posto_ids):
             db.session.rollback()
@@ -983,7 +983,7 @@ def api_delete_booking():
         evento = prenotazione.evento
         utente = prenotazione.utente
         nome_pren = prenotazione.nome_prenotazione
-        posti = Posto.query.filter_by(prenotazione_id=prenotazione_id).with_for_update().all()
+        posti = Posto.query.filter_by(prenotazione_id=prenotazione_id).all()
         posti_str = ', '.join([f"{p.fila}{p.colonna}" for p in posti])
 
         for p in posti:
