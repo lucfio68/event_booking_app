@@ -1,5 +1,6 @@
 import os
 import threading
+import socket
 from datetime import datetime, date, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
@@ -56,43 +57,39 @@ def verify_reset_token(token, max_age=3600):
     except Exception:
         return None
 
-def send_email_async(app, fn_name, **kwargs):
-    """Invia email in un thread separato con una NUOVA sessione SQLAlchemy.
-    Non passa mai oggetti ORM tra thread (solo ID primitivi)."""
+def run_email_task(app, fn, *args, **kwargs):
+    """Esegue l'invio email in un thread separato con timeout socket ridotto.
+    Render blocca SMTP (porta 587), quindi il thread morira' dopo 5s invece di bloccare
+    il worker Gunicorn per 30s."""
     def task():
         with app.app_context():
+            # Riduce il timeout socket a 5s per evitare che SMTP blocchi il thread
+            old_timeout = socket.getdefaulttimeout()
+            socket.setdefaulttimeout(5)
             try:
-                if fn_name == 'confirmation':
-                    evento = db.session.get(Evento, kwargs['evento_id'])
-                    utente = db.session.get(Utente, kwargs['utente_id'])
-                    posti = db.session.query(Posto).filter(Posto.id.in_(kwargs['posti_ids'])).all() if kwargs.get('posti_ids') else []
-                    if evento and utente:
-                        send_confirmation_email(evento, utente, posti, kwargs.get('nome_prenotazione'))
-
-                elif fn_name == 'cancellation':
-                    evento = db.session.get(Evento, kwargs['evento_id'])
-                    utente = db.session.get(Utente, kwargs['utente_id'])
-                    if evento and utente:
-                        send_cancellation_email(
-                            evento, utente, kwargs['posti_str'],
-                            kwargs.get('prenotazione_eliminata', False),
-                            kwargs.get('nome_prenotazione')
-                        )
+                fn(*args, **kwargs)
             except Exception as e:
                 app.logger.error(f'Errore invio email async: {e}')
             finally:
+                socket.setdefaulttimeout(old_timeout)
                 db.session.remove()
-    thread = threading.Thread(target=task)
+    thread = threading.Thread(target=task, daemon=True)
     thread.start()
 
-def send_registration_email(utente):
-    """Email di conferma registrazione all'utente."""
-    try:
-        msg = Message(
-            subject='Benvenuto su EventBooking - Registrazione completata',
-            recipients=[utente.email],
-            sender='EventBooking <noreply@event_booking.com>',
-            body=f"""Ciao {utente.nome_cognome},
+# ==================== EMAIL FUNCTIONS (chiamate solo da thread) ====================
+
+def _send_registration_email(utente_id):
+    """Chiamata solo dal thread di background."""
+    with db.session.no_autoflush:
+        utente = db.session.get(Utente, utente_id)
+        if not utente:
+            return
+        try:
+            msg = Message(
+                subject='Benvenuto su EventBooking - Registrazione completata',
+                recipients=[utente.email],
+                sender='EventBooking <noreply@event_booking.com>',
+                body=f"""Ciao {utente.nome_cognome},
 
 Benvenuto su EventBooking!
 
@@ -107,21 +104,25 @@ Puoi ora accedere all'applicazione e prenotare i posti per gli eventi.
 
 Grazie per esserti registrato!
 """
-        )
-        mail.send(msg)
-    except Exception as e:
-        app.logger.error(f'Errore invio email registrazione utente: {e}')
+            )
+            mail.send(msg)
+        except Exception as e:
+            app.logger.error(f'Errore invio email registrazione: {e}')
 
-def send_registration_notify_admin(utente):
-    """Notifica all'amministratore di una nuova registrazione."""
-    try:
-        admin = Utente.query.filter_by(tipo='admin').first()
-        if admin:
-            msg = Message(
-                subject=f'Nuova Registrazione - {utente.nome_cognome}',
-                recipients=[admin.email],
-                sender='EventBooking <noreply@event_booking.com>',
-                body=f"""Nuovo utente registrato su EventBooking:
+def _send_registration_notify_admin(utente_id):
+    """Chiamata solo dal thread di background."""
+    with db.session.no_autoflush:
+        utente = db.session.get(Utente, utente_id)
+        if not utente:
+            return
+        try:
+            admin = Utente.query.filter_by(tipo='admin').first()
+            if admin:
+                msg = Message(
+                    subject=f'Nuova Registrazione - {utente.nome_cognome}',
+                    recipients=[admin.email],
+                    sender='EventBooking <noreply@event_booking.com>',
+                    body=f"""Nuovo utente registrato su EventBooking:
 
 Nome: {utente.nome_cognome}
 Username: {utente.username}
@@ -131,22 +132,30 @@ Data registrazione: {utente.data_registrazione.strftime('%d/%m/%Y %H:%M')}
 
 L'utente puo' ora effettuare il login e prenotare posti.
 """
-            )
-            mail.send(msg)
-    except Exception as e:
-        app.logger.error(f'Errore invio notifica admin registrazione: {e}')
+                )
+                mail.send(msg)
+        except Exception as e:
+            app.logger.error(f'Errore notifica admin: {e}')
 
-def send_confirmation_email(evento, utente, posti, nome_prenotazione=None):
-    posti_str = ', '.join([f"{p.fila}{p.colonna}" for p in posti])
-    display_name = nome_prenotazione or utente.nome_cognome
-    num_posti = len(posti)
-    posti_label = "posto" if num_posti == 1 else "posti"
+def _send_confirmation_email(evento_id, utente_id, posti_ids, nome_prenotazione=None):
+    """Chiamata solo dal thread di background."""
+    with db.session.no_autoflush:
+        evento = db.session.get(Evento, evento_id)
+        utente = db.session.get(Utente, utente_id)
+        if not evento or not utente:
+            return
+        posti = db.session.query(Posto).filter(Posto.id.in_(posti_ids)).all() if posti_ids else []
+        posti_str = ', '.join([f"{p.fila}{p.colonna}" for p in posti])
+        display_name = nome_prenotazione or utente.nome_cognome
+        num_posti = len(posti)
+        posti_label = "posto" if num_posti == 1 else "posti"
 
-    msg_user = Message(
-        subject=f'Conferma Prenotazione - {num_posti} {posti_label} - {evento.nome}',
-        recipients=[utente.email],
-        sender='EventBooking <noreply@event_booking.com>',
-        body=f"""Ciao {display_name},
+        try:
+            msg_user = Message(
+                subject=f'Conferma Prenotazione - {num_posti} {posti_label} - {evento.nome}',
+                recipients=[utente.email],
+                sender='EventBooking <noreply@event_booking.com>',
+                body=f"""Ciao {display_name},
 
 La tua prenotazione per l'evento "{evento.nome}" e' stata confermata.
 
@@ -157,45 +166,49 @@ Posti prenotati ({num_posti}): {posti_str}
 
 Grazie!
 """
-    )
-    try:
-        mail.send(msg_user)
-    except Exception as e:
-        app.logger.error(f'Errore invio email utente: {e}')
+            )
+            mail.send(msg_user)
+        except Exception as e:
+            app.logger.error(f'Errore email conferma utente: {e}')
 
-    if evento.sala.email_admin:
-        admin_emails = [e.strip() for e in evento.sala.email_admin.split(',') if e.strip()]
-        if admin_emails:
-            msg_admin = Message(
-                subject=f'Nuova Prenotazione - {num_posti} {posti_label} - {evento.nome}',
-                recipients=admin_emails,
-                sender='EventBooking <noreply@event_booking.com>',
-                body=f"""Nuova prenotazione confermata:
+        try:
+            if evento.sala.email_admin:
+                admin_emails = [e.strip() for e in evento.sala.email_admin.split(',') if e.strip()]
+                if admin_emails:
+                    msg_admin = Message(
+                        subject=f'Nuova Prenotazione - {num_posti} {posti_label} - {evento.nome}',
+                        recipients=admin_emails,
+                        sender='EventBooking <noreply@event_booking.com>',
+                        body=f"""Nuova prenotazione confermata:
 
 Evento: {evento.nome}
 Data: {evento.data_evento.strftime('%d/%m/%Y')}
 Utente: {display_name} ({utente.email})
 Posti prenotati ({num_posti}): {posti_str}
 """
-            )
-            try:
-                mail.send(msg_admin)
-            except Exception as e:
-                app.logger.error(f'Errore invio email admin: {e}')
+                    )
+                    mail.send(msg_admin)
+        except Exception as e:
+            app.logger.error(f'Errore email conferma admin: {e}')
 
-
-def send_cancellation_email(evento, utente, posti_str, prenotazione_eliminata=False, nome_prenotazione=None):
-    try:
+def _send_cancellation_email(evento_id, utente_id, posti_str, prenotazione_eliminata=False, nome_prenotazione=None):
+    """Chiamata solo dal thread di background."""
+    with db.session.no_autoflush:
+        evento = db.session.get(Evento, evento_id)
+        utente = db.session.get(Utente, utente_id)
+        if not evento or not utente:
+            return
         display_name = nome_prenotazione or utente.nome_cognome
         num_posti = len([p.strip() for p in posti_str.split(',') if p.strip()]) if posti_str else 0
         posti_label = "posto" if num_posti == 1 else "posti"
 
-        if prenotazione_eliminata:
-            msg = Message(
-                subject=f'Prenotazione Annullata - {num_posti} {posti_label} - {evento.nome}',
-                recipients=[utente.email],
-                sender='EventBooking <noreply@event_booking.com>',
-                body=f"""Ciao {display_name},
+        try:
+            if prenotazione_eliminata:
+                msg = Message(
+                    subject=f'Prenotazione Annullata - {num_posti} {posti_label} - {evento.nome}',
+                    recipients=[utente.email],
+                    sender='EventBooking <noreply@event_booking.com>',
+                    body=f"""Ciao {display_name},
 
 La tua prenotazione per l'evento "{evento.nome}" e' stata annullata (tutti i posti rimossi).
 
@@ -206,13 +219,13 @@ Posti annullati ({num_posti}): {posti_str}
 
 Se non hai richiesto tu questa operazione, contatta l'amministratore.
 """
-            )
-        else:
-            msg = Message(
-                subject=f'Posti Annullati - {num_posti} {posti_label} - {evento.nome}',
-                recipients=[utente.email],
-                sender='EventBooking <noreply@event_booking.com>',
-                body=f"""Ciao {display_name},
+                )
+            else:
+                msg = Message(
+                    subject=f'Posti Annullati - {num_posti} {posti_label} - {evento.nome}',
+                    recipients=[utente.email],
+                    sender='EventBooking <noreply@event_booking.com>',
+                    body=f"""Ciao {display_name},
 
 I posti {posti_str} per l'evento "{evento.nome}" sono stati annullati.
 
@@ -223,10 +236,51 @@ Posti annullati ({num_posti}): {posti_str}
 
 Se non hai richiesto tu questa operazione, contatta l'amministratore.
 """
+                )
+            mail.send(msg)
+        except Exception as e:
+            app.logger.error(f'Errore email cancellazione: {e}')
+
+def _send_reset_password_email(utente_id, reset_url):
+    """Chiamata solo dal thread di background."""
+    with db.session.no_autoflush:
+        utente = db.session.get(Utente, utente_id)
+        if not utente:
+            return
+        try:
+            msg = Message(
+                subject='Reset Password EventBooking',
+                recipients=[utente.email],
+                sender='EventBooking <noreply@event_booking.com>',
+                body=f"""Ciao {utente.nome_cognome},
+
+Hai richiesto il reset della password.
+
+Clicca sul link seguente per reimpostarla:
+{reset_url}
+
+Il link scade tra 1 ora.
+
+Se non hai richiesto tu questa operazione, ignora questa email.
+"""
             )
-        mail.send(msg)
-    except Exception as e:
-        app.logger.error(f'Errore invio email eliminazione: {e}')
+            mail.send(msg)
+        except Exception as e:
+            app.logger.error(f'Errore email reset password: {e}')
+
+def _send_deletion_emails(email_data_list):
+    """Chiamata solo dal thread di background. Invia tutte le email di cancellazione."""
+    for data in email_data_list:
+        try:
+            msg = Message(
+                subject=data['subject'],
+                recipients=[data['recipient']],
+                sender='EventBooking <noreply@event_booking.com>',
+                body=data['body']
+            )
+            mail.send(msg)
+        except Exception as e:
+            app.logger.error(f'Errore email cancellazione posti: {e}')
 
 # ==================== AUTH ====================
 
@@ -267,8 +321,9 @@ def register():
         db.session.add(user)
         db.session.commit()
 
-        send_registration_email(user)
-        send_registration_notify_admin(user)
+        # Email in background (non blocca la risposta)
+        run_email_task(app, _send_registration_email, user.id)
+        run_email_task(app, _send_registration_notify_admin, user.id)
 
         flash('Registrazione completata! Effettua il login.', 'success')
         return redirect(url_for('login'))
@@ -308,28 +363,11 @@ def forgot_password():
 
         token = get_reset_token(user.email)
         reset_url = url_for('reset_password', token=token, _external=True)
-        msg = Message(
-            subject='Reset Password EventBooking',
-            recipients=[user.email],
-            sender='EventBooking <noreply@event_booking.com>',
-            body=f"""Ciao {user.nome_cognome},
 
-Hai richiesto il reset della password.
+        # Email in background (non blocca la risposta)
+        run_email_task(app, _send_reset_password_email, user.id, reset_url)
 
-Clicca sul link seguente per reimpostarla:
-{reset_url}
-
-Il link scade tra 1 ora.
-
-Se non hai richiesto tu questa operazione, ignora questa email.
-"""
-        )
-        try:
-            mail.send(msg)
-            flash('Email di reset inviata! Controlla la tua casella di posta.', 'success')
-        except Exception as e:
-            app.logger.error(f'Errore invio email reset: {e}')
-            flash("Errore nell'invio dell'email. Riprova piu' tardi.", 'danger')
+        flash('Email di reset inviata! Controlla la tua casella di posta.', 'success')
         return redirect(url_for('login'))
     return render_template('forgot_password.html')
 
@@ -652,13 +690,12 @@ def api_book():
         app.logger.error(f'Errore prenotazione: {e}')
         return jsonify({'error': 'Errore interno durante la prenotazione'}), 500
 
-    # INVIO EMAIL IN BACKGROUND: passa solo ID primitivi, il thread crea una nuova sessione
-    send_email_async(
-        app, 'confirmation',
-        evento_id=evento.id,
-        utente_id=current_user.id,
-        posti_ids=[p.id for p in posti],
-        nome_prenotazione=nome_prenotazione
+    # Email in background (non blocca la risposta HTTP)
+    run_email_task(
+        app, _send_confirmation_email,
+        evento.id, current_user.id,
+        [p.id for p in posti],
+        nome_prenotazione
     )
     return jsonify({'success': True, 'prenotazione_id': prenotazione.id})
 
@@ -833,99 +870,95 @@ def api_delete_seats():
 
         db.session.commit()
 
-        operatore = "Amministratore" if current_user.is_admin() else "Utente"
-        operatore_nome = current_user.nome_cognome
-        operatore_email = current_user.email
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f'Errore eliminazione posti: {e}')
+        return jsonify({'error': 'Errore interno'}), 500
 
-        try:
-            for pid, info in prenotazioni_coinvolte.items():
-                pren = info['prenotazione']
-                evento = info['evento']
-                utente = pren.utente
-                pren_esiste = db.session.get(Prenotazione, pid)
-                prenotazione_eliminata = (pren_esiste is None)
-                nome_pren = pren.nome_prenotazione
+    # Prepara i dati per le email (tutto primitivo, nessun oggetto ORM)
+    operatore = "Amministratore" if current_user.is_admin() else "Utente"
+    operatore_nome = current_user.nome_cognome
+    operatore_email = current_user.email
 
-                if prenotazione_eliminata:
-                    num_posti = len(info['posti'])
-                    label = "posto" if num_posti == 1 else "posti"
-                    msg = Message(
-                        subject=f'Prenotazione Annullata - {num_posti} {label} - {evento.nome}',
-                        recipients=[utente.email],
-                        sender='EventBooking <noreply@event_booking.com>',
-                        body=f"""Ciao {nome_pren or utente.nome_cognome},
+    email_data_list = []
+    for pid, info in prenotazioni_coinvolte.items():
+        pren = info['prenotazione']
+        evento = info['evento']
+        utente = pren.utente
+        pren_esiste = db.session.get(Prenotazione, pid)
+        prenotazione_eliminata = (pren_esiste is None)
+        nome_pren = pren.nome_prenotazione
+        posti_list = info['posti']
+        posti_str_local = ', '.join([f"{p.fila}{p.colonna}" for p in posti_list])
+        num_posti_local = len(posti_list)
+        label = "posto" if num_posti_local == 1 else "posti"
+
+        if prenotazione_eliminata:
+            subject = f'Prenotazione Annullata - {num_posti_local} {label} - {evento.nome}'
+            body = f"""Ciao {nome_pren or utente.nome_cognome},
 
 La tua prenotazione per l'evento "{evento.nome}" e' stata annullata (tutti i posti rimossi).
 
 Data: {evento.data_evento.strftime('%d/%m/%Y')}
 Ora: {evento.ora_inizio.strftime('%H:%M')}
 Sala: {evento.sala.nome}
-Posti annullati ({num_posti}): {', '.join([f"{p.fila}{p.colonna}" for p in info['posti']])}
+Posti annullati ({num_posti_local}): {posti_str_local}
 
 Operazione effettuata da: {operatore} ({operatore_nome} - {operatore_email})
 
 Se non hai richiesto tu questa operazione, contatta l'amministratore.
 """
-                    )
-                else:
-                    posti_rimossi = ', '.join([f"{p.fila}{p.colonna}" for p in info['posti']])
-                    num_rimossi = len(info['posti'])
-                    label = "posto" if num_rimossi == 1 else "posti"
-                    msg = Message(
-                        subject=f'Posti Annullati - {num_rimossi} {label} - {evento.nome}',
-                        recipients=[utente.email],
-                        sender='EventBooking <noreply@event_booking.com>',
-                        body=f"""Ciao {nome_pren or utente.nome_cognome},
+        else:
+            subject = f'Posti Annullati - {num_posti_local} {label} - {evento.nome}'
+            body = f"""Ciao {nome_pren or utente.nome_cognome},
 
-I posti {posti_rimossi} per l'evento "{evento.nome}" sono stati annullati.
+I posti {posti_str_local} per l'evento "{evento.nome}" sono stati annullati.
 
 Data: {evento.data_evento.strftime('%d/%m/%Y')}
 Ora: {evento.ora_inizio.strftime('%H:%M')}
 Sala: {evento.sala.nome}
-Posti annullati ({num_rimossi}): {posti_rimossi}
+Posti annullati ({num_posti_local}): {posti_str_local}
 
 Operazione effettuata da: {operatore} ({operatore_nome} - {operatore_email})
 
 Se non hai richiesto tu questa operazione, contatta l'amministratore.
 """
-                    )
-                mail.send(msg)
 
-                if current_user.is_admin() and evento.sala.email_admin:
-                    admin_emails = [e.strip() for e in evento.sala.email_admin.split(',') if e.strip()]
-                    if admin_emails:
-                        msg_admin = Message(
-                            subject=f'Notifica: Posti Annullati da Admin - {evento.nome}',
-                            recipients=admin_emails,
-                            sender='EventBooking <noreply@event_booking.com>',
-                            body=f"""Notifica operazione di cancellazione:
+        email_data_list.append({
+            'subject': subject,
+            'recipient': utente.email,
+            'body': body
+        })
+
+        if current_user.is_admin() and evento.sala.email_admin:
+            admin_emails = [e.strip() for e in evento.sala.email_admin.split(',') if e.strip()]
+            for admin_email in admin_emails:
+                email_data_list.append({
+                    'subject': f'Notifica: Posti Annullati da Admin - {evento.nome}',
+                    'recipient': admin_email,
+                    'body': f"""Notifica operazione di cancellazione:
 
 Evento: {evento.nome}
 Data: {evento.data_evento.strftime('%d/%m/%Y')}
 Sala: {evento.sala.nome}
-Posti annullati: {', '.join([f"{p.fila}{p.colonna}" for p in info['posti']])}
+Posti annullati: {posti_str_local}
 
 Prenotazione di: {utente.nome_cognome} ({utente.email})
 Operazione effettuata da: {operatore_nome} ({operatore_email})
 
 Questa e' una notifica automatica.
 """
-                        )
-                        mail.send(msg_admin)
-        except Exception as e:
-            app.logger.error(f'Errore invio email annullamento posti: {e}')
+                })
 
-        return jsonify({
-            'success': True,
-            'posti_eliminati': len(posti),
-            'prenotazioni_eliminate': len(prenotazioni_da_eliminare),
-            'posti': posti_str_parts
-        })
+    # Invia email in background (non blocca la risposta HTTP)
+    run_email_task(app, _send_deletion_emails, email_data_list)
 
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f'Errore eliminazione posti: {e}')
-        return jsonify({'error': 'Errore interno'}), 500
+    return jsonify({
+        'success': True,
+        'posti_eliminati': len(posti),
+        'prenotazioni_eliminate': len(prenotazioni_da_eliminare),
+        'posti': posti_str_parts
+    })
 
 # ==================== ELIMINA PRENOTAZIONE INTERA ====================
 
@@ -965,14 +998,11 @@ def api_delete_booking():
         app.logger.error(f'Errore eliminazione: {e}')
         return jsonify({'error': 'Errore interno'}), 500
 
-    # Email di notifica in background (solo ID primitivi, nuova sessione nel thread)
-    send_email_async(
-        app, 'cancellation',
-        evento_id=evento.id,
-        utente_id=utente.id,
-        posti_str=posti_str,
-        prenotazione_eliminata=True,
-        nome_prenotazione=nome_pren
+    # Email in background (non blocca la risposta HTTP)
+    run_email_task(
+        app, _send_cancellation_email,
+        evento.id, utente.id, posti_str,
+        True, nome_pren
     )
     return jsonify({'success': True})
 
