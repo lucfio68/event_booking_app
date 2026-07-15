@@ -1,4 +1,5 @@
 import os
+import threading
 from datetime import datetime, date, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
@@ -54,6 +55,18 @@ def verify_reset_token(token, max_age=3600):
         return email
     except Exception:
         return None
+
+def send_email_async(app, fn, *args, **kwargs):
+    """Esegue l'invio email in un thread separato per non bloccare la risposta HTTP.
+    Essenziale su Render dove SMTP può andare in timeout."""
+    def task():
+        with app.app_context():
+            try:
+                fn(*args, **kwargs)
+            except Exception as e:
+                app.logger.error(f'Errore invio email async: {e}')
+    thread = threading.Thread(target=task)
+    thread.start()
 
 def send_registration_email(utente):
     """Email di conferma registrazione all'utente."""
@@ -623,13 +636,15 @@ def api_book():
             p.prenotazione_id = prenotazione.id
 
         db.session.commit()
-        send_confirmation_email(evento, current_user, posti, nome_prenotazione)
-        return jsonify({'success': True, 'prenotazione_id': prenotazione.id})
 
     except Exception as e:
         db.session.rollback()
         app.logger.error(f'Errore prenotazione: {e}')
         return jsonify({'error': 'Errore interno durante la prenotazione'}), 500
+
+    # INVIO EMAIL IN BACKGROUND: non blocca la risposta, immune al timeout SMTP di Render
+    send_email_async(app, send_confirmation_email, evento, current_user, posti, nome_prenotazione)
+    return jsonify({'success': True, 'prenotazione_id': prenotazione.id})
 
 # ==================== RISERVA POSTI (ADMIN) ====================
 
@@ -933,12 +948,14 @@ def api_delete_booking():
         db.session.delete(prenotazione)
         db.session.commit()
 
-        send_cancellation_email(evento, utente, posti_str, prenotazione_eliminata=True, nome_prenotazione=nome_pren)
-        return jsonify({'success': True})
     except Exception as e:
         db.session.rollback()
         app.logger.error(f'Errore eliminazione: {e}')
         return jsonify({'error': 'Errore interno'}), 500
+
+    # Email di notifica in background (non blocca, non può causare rollback su transazione già salvata)
+    send_email_async(app, send_cancellation_email, evento, utente, posti_str, True, nome_pren)
+    return jsonify({'success': True})
 
 # ==================== ADMIN VIEW ====================
 
