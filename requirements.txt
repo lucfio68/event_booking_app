@@ -14,3 +14,6 @@ Flask-WTF==1.2.1
 Flask-Limiter==3.7.0
 email-validator==2.1.0
 gunicorn==22.0.0
+
+# Fallback email API (SendGrid su Render free tier)
+requests>=2.31.0

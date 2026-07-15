@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 import socket
 from datetime import datetime, date, timedelta
@@ -26,6 +27,79 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 
 db.init_app(app)
 mail = Mail(app)
+
+# ==================== EMAIL FALLBACK (SMTP → Resend API) ====================
+
+def _extract_email(raw):
+    """Estrae l'indirizzo email da stringhe tipo 'Nome <email@dom.com>'."""
+    if not raw:
+        return 'noreply@eventbooking.com'
+    m = re.search(r'<([^>]+)>', raw)
+    return m.group(1).strip() if m else raw.strip()
+
+def _is_network_error(e):
+    """Riconosce errori di rete comuni su Render free tier."""
+    msg = str(e).lower()
+    network_errors = [
+        'network is unreachable', 'no route to host', 'connection refused',
+        'connection timed out', 'name or service not known', 'temporary failure in name resolution',
+        'errno 101', 'errno 111', 'errno 113', 'errno -2', 'errno -3',
+        'ssl', 'tls', 'authentication', 'smtplib'
+    ]
+    return any(err in msg for err in network_errors)
+
+class EmailNetworkError(Exception):
+    pass
+
+def send_email_message(msg):
+    """Invia email via SMTP; se la rete è bloccata (Render free), fallback su Resend API.
+    Resend usa HTTPS porta 443, piano free perpetuo, compatibile Render free tier."""
+    # Tentativo 1: SMTP (locale / server dedicato)
+    old_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(5)
+    try:
+        mail.send(msg)
+        socket.setdefaulttimeout(old_timeout)
+        return True
+    except Exception as smtp_err:
+        socket.setdefaulttimeout(old_timeout)
+        if not _is_network_error(smtp_err):
+            raise  # Errore reale del codice, non di rete
+
+        # Tentativo 2: Resend API (HTTP/443, piano free perpetuo, compatibile Render free tier)
+        api_key = app.config.get('RESEND_API_KEY')
+        if not api_key:
+            raise EmailNetworkError(f'SMTP fallito per rete e RESEND_API_KEY mancante: {smtp_err}')
+
+        try:
+            import requests
+            payload = {
+                "from": _extract_email(msg.sender or app.config.get('MAIL_DEFAULT_SENDER')),
+                "to": msg.recipients if isinstance(msg.recipients, list) else [msg.recipients],
+                "subject": msg.subject,
+                "text": msg.body or ''
+            }
+            if msg.html:
+                payload["html"] = msg.html
+
+            resp = requests.post(
+                'https://api.resend.com/emails',
+                headers={
+                    'Authorization': f'Bearer {api_key}',
+                    'Content-Type': 'application/json'
+                },
+                json=payload,
+                timeout=10
+            )
+            if resp.status_code in (200, 201, 202):
+                return True
+            raise EmailNetworkError(f'Resend HTTP {resp.status_code}: {resp.text[:300]}')
+        except EmailNetworkError:
+            raise
+        except Exception as res_err:
+            raise EmailNetworkError(f'SMTP: {smtp_err} | Resend: {res_err}')
+
+
 
 limiter = Limiter(
     get_remote_address,
@@ -57,23 +131,49 @@ def verify_reset_token(token, max_age=3600):
     except Exception:
         return None
 
+# ==================== EMAIL WRAPPER (graceful per Render free tier) ====================
+
+_email_queue = []  # Queue in memoria per retry al prossimo avvio
+
+class EmailNetworkError(Exception):
+    pass
+
+def _is_network_error(e):
+    """Riconosce errori di rete comuni su Render free tier."""
+    msg = str(e).lower()
+    network_errors = [
+        'network is unreachable', 'no route to host', 'connection refused',
+        'connection timed out', 'name or service not known', 'temporary failure in name resolution',
+        'errno 101', 'errno 111', 'errno 113', 'errno -2', 'errno -3',
+        'ssl', 'tls', 'authentication', 'smtplib'
+    ]
+    return any(err in msg for err in network_errors)
+
+def _graceful_send_email(app, fn, *args, **kwargs):
+    """Wrapper che cattura errori di rete senza riempire i log di ERROR."""
+    with app.app_context():
+        old_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(5)
+        try:
+            fn(*args, **kwargs)
+            app.logger.info(f'Email inviata correttamente: {fn.__name__}')
+        except Exception as e:
+            if _is_network_error(e):
+                app.logger.info(f'Email non inviata (rete non disponibile, tipico Render free tier): {fn.__name__} — {e}')
+                # Salva in queue per possibile retry
+                _email_queue.append({'fn': fn.__name__, 'args': args, 'kwargs': kwargs, 'error': str(e)})
+            else:
+                app.logger.error(f'Errore invio email async: {e}')
+        finally:
+            socket.setdefaulttimeout(old_timeout)
+            db.session.remove()
+
 def run_email_task(app, fn, *args, **kwargs):
     """Esegue l'invio email in un thread separato con timeout socket ridotto.
-    Render blocca SMTP (porta 587), quindi il thread morira' dopo 5s invece di bloccare
-    il worker Gunicorn per 30s."""
-    def task():
-        with app.app_context():
-            # Riduce il timeout socket a 5s per evitare che SMTP blocchi il thread
-            old_timeout = socket.getdefaulttimeout()
-            socket.setdefaulttimeout(5)
-            try:
-                fn(*args, **kwargs)
-            except Exception as e:
-                app.logger.error(f'Errore invio email async: {e}')
-            finally:
-                socket.setdefaulttimeout(old_timeout)
-                db.session.remove()
-    thread = threading.Thread(target=task, daemon=True)
+    Render free tier blocca SMTP (porta 587), quindi il thread morira' dopo 5s
+    invece di bloccare il worker Gunicorn per 30s. Gli errori di rete sono
+    catturati gracefulmente e loggati come INFO."""
+    thread = threading.Thread(target=_graceful_send_email, args=(app, fn) + args, kwargs=kwargs, daemon=True)
     thread.start()
 
 # ==================== EMAIL FUNCTIONS (chiamate solo da thread) ====================
@@ -105,7 +205,7 @@ Puoi ora accedere all'applicazione e prenotare i posti per gli eventi.
 Grazie per esserti registrato!
 """
             )
-            mail.send(msg)
+            send_email_message(msg)
         except Exception as e:
             app.logger.error(f'Errore invio email registrazione: {e}')
 
@@ -133,7 +233,7 @@ Data registrazione: {utente.data_registrazione.strftime('%d/%m/%Y %H:%M')}
 L'utente puo' ora effettuare il login e prenotare posti.
 """
                 )
-                mail.send(msg)
+                send_email_message(msg)
         except Exception as e:
             app.logger.error(f'Errore notifica admin: {e}')
 
@@ -167,7 +267,7 @@ Posti prenotati ({num_posti}): {posti_str}
 Grazie!
 """
             )
-            mail.send(msg_user)
+            send_email_message(msg_user)
         except Exception as e:
             app.logger.error(f'Errore email conferma utente: {e}')
 
@@ -187,7 +287,7 @@ Utente: {display_name} ({utente.email})
 Posti prenotati ({num_posti}): {posti_str}
 """
                     )
-                    mail.send(msg_admin)
+                    send_email_message(msg_admin)
         except Exception as e:
             app.logger.error(f'Errore email conferma admin: {e}')
 
@@ -237,7 +337,7 @@ Posti annullati ({num_posti}): {posti_str}
 Se non hai richiesto tu questa operazione, contatta l'amministratore.
 """
                 )
-            mail.send(msg)
+            send_email_message(msg)
         except Exception as e:
             app.logger.error(f'Errore email cancellazione: {e}')
 
@@ -264,7 +364,7 @@ Il link scade tra 1 ora.
 Se non hai richiesto tu questa operazione, ignora questa email.
 """
             )
-            mail.send(msg)
+            send_email_message(msg)
         except Exception as e:
             app.logger.error(f'Errore email reset password: {e}')
 
@@ -278,7 +378,7 @@ def _send_deletion_emails(email_data_list):
                 sender='EventBooking <noreply@event_booking.com>',
                 body=data['body']
             )
-            mail.send(msg)
+            send_email_message(msg)
         except Exception as e:
             app.logger.error(f'Errore email cancellazione posti: {e}')
 
@@ -664,7 +764,7 @@ def api_book():
             Posto.id.in_(posti_ids),
             Posto.evento_id == evento_id,
             Posto.stato == 'libero'
-        ).all()
+        ).with_for_update().all()
 
         if len(posti) != len(posti_ids):
             db.session.rollback()
@@ -721,7 +821,7 @@ def api_reserve():
             Posto.id.in_(posti_ids),
             Posto.evento_id == evento_id,
             Posto.stato == 'libero'
-        ).all()
+        ).with_for_update().all()
 
         if len(posti) != len(posti_ids):
             db.session.rollback()
@@ -813,12 +913,12 @@ def api_delete_seats():
             posti = Posto.query.filter(
                 Posto.id.in_(posto_ids),
                 Posto.stato.in_(['prenotato', 'riservato', 'abbonato'])
-            ).all()
+            ).with_for_update().all()
         else:
             posti = Posto.query.filter(
                 Posto.id.in_(posto_ids),
                 Posto.stato == 'prenotato'
-            ).all()
+            ).with_for_update().all()
 
         if len(posti) != len(posto_ids):
             db.session.rollback()
@@ -983,7 +1083,7 @@ def api_delete_booking():
         evento = prenotazione.evento
         utente = prenotazione.utente
         nome_pren = prenotazione.nome_prenotazione
-        posti = Posto.query.filter_by(prenotazione_id=prenotazione_id).all()
+        posti = Posto.query.filter_by(prenotazione_id=prenotazione_id).with_for_update().all()
         posti_str = ', '.join([f"{p.fila}{p.colonna}" for p in posti])
 
         for p in posti:
