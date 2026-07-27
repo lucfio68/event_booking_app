@@ -19,3 +19,5 @@ class Config:
     MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER')
     RESEND_API_KEY = os.environ.get('RESEND_API_KEY') or ''
     RESEND_FROM_EMAIL = os.environ.get('RESEND_FROM_EMAIL') or 'onboarding@resend.dev' or 'EventBooking <x3me.over@gmail.com.com>'
+    BREVO_API_KEY = os.environ.get('BREVO_API_KEY') or ''
+    BREVO_FROM_EMAIL = os.environ.get('BREVO_FROM_EMAIL') or ''
