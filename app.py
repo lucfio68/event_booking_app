@@ -762,6 +762,7 @@ def api_seats(event_id):
 @limiter.limit("10 per minute")
 def api_book():
     data = request.get_json(silent=True) or {}
+    app.logger.warning(f'DEBUG BOOK — Content-Type: {request.content_type!r} | Body: {request.get_data(as_text=True)[:500]!r} | data parsato: {data!r}')
     evento_id = data.get('evento_id')
     posti_ids = data.get('posti_ids', [])
     nome_prenotazione = data.get('nome_prenotazione', '').strip() or None
