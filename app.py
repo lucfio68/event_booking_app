@@ -57,10 +57,77 @@ def _is_network_error(e):
 class EmailNetworkError(Exception):
     pass
 
+def _send_via_brevo(msg, api_key):
+    """Invia email tramite l'API HTTP di Brevo. Richiede solo un mittente
+    verificato (no dominio DNS obbligatorio), compatibile con Render free tier."""
+    import requests
+    from_email = app.config.get('BREVO_FROM_EMAIL') or _extract_email(app.config.get('MAIL_DEFAULT_SENDER'))
+    if not from_email:
+        raise EmailNetworkError('BREVO_FROM_EMAIL non configurato')
+
+    recipients = msg.recipients if isinstance(msg.recipients, list) else [msg.recipients]
+    payload = {
+        "sender": {"email": from_email, "name": "EventBooking"},
+        "to": [{"email": r} for r in recipients],
+        "subject": msg.subject,
+        "textContent": msg.body or ''
+    }
+    if msg.html:
+        payload["htmlContent"] = msg.html
+
+    resp = requests.post(
+        'https://api.brevo.com/v3/smtp/email',
+        headers={
+            'api-key': api_key,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
+        json=payload,
+        timeout=10
+    )
+    if resp.status_code in (200, 201, 202):
+        return True
+    raise EmailNetworkError(f'Brevo HTTP {resp.status_code}: {resp.text[:300]}')
+
+
+def _send_via_resend(msg, api_key):
+    """Invia email tramite l'API HTTP di Resend. Richiede dominio verificato
+    per inviare a destinatari diversi dal proprio account."""
+    import requests
+    resend_from = app.config.get('RESEND_FROM_EMAIL')
+    if not resend_from:
+        extracted = _extract_email(msg.sender or app.config.get('MAIL_DEFAULT_SENDER'))
+        if extracted and extracted.split('@')[-1] not in ('resend.dev',):
+            resend_from = 'onboarding@resend.dev'
+        else:
+            resend_from = extracted or 'onboarding@resend.dev'
+
+    payload = {
+        "from": resend_from,
+        "to": msg.recipients if isinstance(msg.recipients, list) else [msg.recipients],
+        "subject": msg.subject,
+        "text": msg.body or ''
+    }
+    if msg.html:
+        payload["html"] = msg.html
+
+    resp = requests.post(
+        'https://api.resend.com/emails',
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json'
+        },
+        json=payload,
+        timeout=10
+    )
+    if resp.status_code in (200, 201, 202):
+        return True
+    raise EmailNetworkError(f'Resend HTTP {resp.status_code}: {resp.text[:300]}')
+
+
 def send_email_message(msg):
-    """Invia email via SMTP; se la rete è bloccata (Render free), fallback su Resend API.
-    Resend usa HTTPS porta 443, piano free perpetuo, compatibile Render free tier."""
-    # Tentativo 1: SMTP (locale / server dedicato)
+    """Invia email: SMTP -> Brevo (primario per Render free tier) -> Resend (fallback,
+    utile quando avrai un dominio verificato su Resend)."""
     old_timeout = socket.getdefaulttimeout()
     socket.setdefaulttimeout(5)
     try:
@@ -70,53 +137,29 @@ def send_email_message(msg):
     except Exception as smtp_err:
         socket.setdefaulttimeout(old_timeout)
         if not _is_network_error(smtp_err):
-            raise  # Errore reale del codice, non di rete
-
-        # Tentativo 2: Resend API (HTTP/443, piano free perpetuo, compatibile Render free tier)
-        api_key = app.config.get('RESEND_API_KEY')
-        if not api_key:
-            raise EmailNetworkError(f'SMTP fallito per rete e RESEND_API_KEY mancante: {smtp_err}')
-
-        try:
-            import requests
-            # Resend richiede un dominio verificato. Usa RESEND_FROM_EMAIL se configurato,
-            # altrimenti fallback su onboarding@resend.dev (indirizzo di test Resend)
-            resend_from = app.config.get('RESEND_FROM_EMAIL')
-            if not resend_from:
-                # Estrai dal sender originale, ma se il dominio è fittizio usa il default Resend
-                extracted = _extract_email(msg.sender or app.config.get('MAIL_DEFAULT_SENDER'))
-                if extracted and extracted.split('@')[-1] not in ('resend.dev',):
-                    # Se il dominio non è verificato su Resend, usa il fallback
-                    resend_from = 'onboarding@resend.dev'
-                else:
-                    resend_from = extracted or 'onboarding@resend.dev'
-
-            payload = {
-                "from": resend_from,
-                "to": msg.recipients if isinstance(msg.recipients, list) else [msg.recipients],
-                "subject": msg.subject,
-                "text": msg.body or ''
-            }
-            if msg.html:
-                payload["html"] = msg.html
-
-            resp = requests.post(
-                'https://api.resend.com/emails',
-                headers={
-                    'Authorization': f'Bearer {api_key}',
-                    'Content-Type': 'application/json'
-                },
-                json=payload,
-                timeout=10
-            )
-            if resp.status_code in (200, 201, 202):
-                return True
-            raise EmailNetworkError(f'Resend HTTP {resp.status_code}: {resp.text[:300]}')
-        except EmailNetworkError:
             raise
-        except Exception as res_err:
-            raise EmailNetworkError(f'SMTP: {smtp_err} | Resend: {res_err}')
 
+        errors = [f'SMTP: {smtp_err}']
+
+        brevo_key = app.config.get('BREVO_API_KEY')
+        if brevo_key:
+            try:
+                return _send_via_brevo(msg, brevo_key)
+            except Exception as brevo_err:
+                errors.append(f'Brevo: {brevo_err}')
+        else:
+            errors.append('Brevo: BREVO_API_KEY non configurata')
+
+        resend_key = app.config.get('RESEND_API_KEY')
+        if resend_key:
+            try:
+                return _send_via_resend(msg, resend_key)
+            except Exception as resend_err:
+                errors.append(f'Resend: {resend_err}')
+        else:
+            errors.append('Resend: RESEND_API_KEY non configurata')
+
+        raise EmailNetworkError(' | '.join(errors))
 
 
 limiter = Limiter(
