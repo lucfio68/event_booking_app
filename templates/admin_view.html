@@ -165,13 +165,13 @@
                 if (seat) {
                     var seatDiv = document.createElement('div');
                     var classes = ['seat', seat.stato];
-                    if (seat.utente) classes.push('admin-name');
+                    if (seat.nome_prenotazione) classes.push('admin-name');
                     seatDiv.className = classes.join(' ');
                     seatDiv.setAttribute('data-id', seat.id);
                     seatDiv.setAttribute('data-fila', seat.fila);
                     seatDiv.setAttribute('data-colonna', seat.colonna);
-                    seatDiv.textContent = seat.utente ? seat.utente.substring(0, 6) : seat.colonna;
-                    seatDiv.title = seat.utente ? ('Fila ' + seat.fila + ' Col ' + seat.colonna + ' - ' + seat.utente) : ('Fila ' + seat.fila + ' Col ' + seat.colonna + ' - Libero');
+                    seatDiv.textContent = seat.nome_prenotazione ? seat.nome_prenotazione.substring(0, 6) : seat.colonna;
+                    seatDiv.title = seat.nome_prenotazione ? ('Fila ' + seat.fila + ' Col ' + seat.colonna + ' - ' + seat.nome_prenotazione) : ('Fila ' + seat.fila + ' Col ' + seat.colonna + ' - Libero');
                     if (seat.prenotazione_id) {
                         seatDiv.style.cursor = 'pointer';
                         (function(pid) {
