@@ -126,7 +126,7 @@ body {
 
 .calendar-grid {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 2px;
     background: white;
     border-radius: 12px;
@@ -143,6 +143,8 @@ body {
 }
 .day-cell {
     min-height: 100px;
+    min-width: 0;
+    overflow: hidden;
     border: 1px solid #e2e8f0;
     padding: 8px;
     cursor: pointer;
@@ -404,6 +406,8 @@ body {
     .navbar { flex-direction: column; gap: 10px; padding: 15px; }
     .form-row { flex-direction: column; gap: 0; }
     .day-cell { min-height: 60px; padding: 4px; }
+    .day-event { font-size: 0.68em; padding: 2px 3px; }
+    .day-header { padding: 6px 2px; font-size: 0.8em; }
     .booking-actions { flex-direction: column; }
     .seats-legend { gap: 10px; }
 
