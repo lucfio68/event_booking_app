@@ -403,9 +403,32 @@ body {
     .navbar { flex-direction: column; gap: 10px; padding: 15px; }
     .form-row { flex-direction: column; gap: 0; }
     .day-cell { min-height: 60px; padding: 4px; }
-    .seat { width: 36px; height: 36px; font-size: 0.7em; }
     .booking-actions { flex-direction: column; }
     .seats-legend { gap: 10px; }
+
+    /* Tasti e frecce: dimensione minima consigliata per il touch (44x44px) */
+    .btn-arrow { width: 44px; height: 44px; }
+    .btn { min-height: 44px; padding: 12px 20px; }
+    .btn-sm { min-height: 40px; padding: 8px 16px; }
+
+    /* Mappa posti: scroll orizzontale controllato invece di overflow accidentale */
+    .seats-container {
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 20px 15px;
+    }
+    .seat-row { gap: 6px; }
+    .seat { width: 40px; height: 40px; font-size: 0.72em; }
+    .row-label { width: 26px; font-size: 0.85em; }
+}
+
+/* Telefoni piccoli (larghezza ridotta) */
+@media (max-width: 420px) {
+    .seat { width: 36px; height: 36px; font-size: 0.68em; }
+    .seat-row { gap: 5px; }
+    .row-label { width: 22px; font-size: 0.8em; }
+    .container { padding: 12px; }
 }
 
 

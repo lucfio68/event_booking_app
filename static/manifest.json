@@ -4,7 +4,7 @@
   "description": "Prenotazione posti per eventi in sala",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1a1a2e",
+  "background_color": "#f0f2f5",
   "theme_color": "#e94560",
   "orientation": "portrait-primary",
   "scope": "/",
