@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Gestione Generi Evento{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <h2>🏷️ Gestione Generi Evento</h2>
+    <p class="text-muted">I generi (es. "Concerto", "Conferenza") ti permettono di avere layout posti diversi per tipologia di evento nella stessa sala.</p>
+
+    <div class="form-card" style="margin-top:20px;">
+        <h3>Nuovo Genere</h3>
+        <form method="POST" action="{{ url_for('admin_generi_add') }}">
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Nome</label>
+                    <input type="text" name="nome" required class="form-control" placeholder="es. Concerto">
+                </div>
+                <div class="form-group col-6">
+                    <label>Descrizione (opzionale)</label>
+                    <input type="text" name="descrizione" class="form-control" placeholder="es. Eventi musicali dal vivo">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Aggiungi Genere</button>
+        </form>
+    </div>
+
+    <div class="prenotazioni-list">
+        <h3>Generi esistenti ({{ generi|length }})</h3>
+        {% if generi %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Nome</th>
+                    <th>Descrizione</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for g in generi %}
+                <tr>
+                    <td>{{ g.nome }}</td>
+                    <td>{{ g.descrizione or '-' }}</td>
+                    <td>
+                        <form method="POST" action="{{ url_for('admin_generi_delete', genere_id=g.id) }}" style="display:inline;" onsubmit="return confirm('Eliminare il genere &quot;{{ g.nome }}&quot;?');">
+                            <button type="submit" class="btn btn-sm btn-danger">Elimina</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>Nessun genere creato finora.</p>
+        {% endif %}
+    </div>
+
+    <a href="{{ url_for('admin_layout_posti') }}" class="btn btn-outline">Vai a Gestione Layout Posti</a>
+    <a href="{{ url_for('calendar_view') }}" class="btn btn-outline">Torna al Calendario</a>
+</div>
+{% endblock %}

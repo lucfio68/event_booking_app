@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Gestione Layout Posti{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <h2>🪑 Gestione Layout Posti</h2>
+    <p class="text-muted">Configura le disposizioni posti riutilizzabili per ogni sala, così da non doverle reinserire ogni volta in fase di creazione evento.</p>
+
+    <div class="search-box">
+        <form method="GET" action="{{ url_for('admin_layout_posti') }}" style="display:flex; gap:10px; align-items:center;">
+            <label style="font-weight:600;">Sala:</label>
+            <select name="sala_id" class="form-control" style="max-width:300px;" onchange="this.form.submit()">
+                <option value="">-- Seleziona Sala --</option>
+                {% for s in sale %}
+                <option value="{{ s.id }}" {% if sala_selezionata and sala_selezionata.id == s.id %}selected{% endif %}>
+                    {{ s.nome }} (max {{ s.posti_max }}{% if s.overbooking_max %} + {{ s.overbooking_max }} overbooking{% endif %})
+                </option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+
+    {% if not sala_selezionata %}
+    <div class="alert alert-info">Seleziona una sala per vedere e gestire i suoi layout.</div>
+    {% else %}
+
+    <div class="form-card">
+        <h3>Nuovo Layout per "{{ sala_selezionata.nome }}"</h3>
+        <form method="POST" action="{{ url_for('admin_layout_posti_add') }}">
+            <input type="hidden" name="sala_id" value="{{ sala_selezionata.id }}">
+
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Nome Layout</label>
+                    <input type="text" name="nome" required class="form-control" placeholder="es. Platea intera">
+                </div>
+                <div class="form-group col-6">
+                    <label>Genere (opzionale)</label>
+                    <select name="genere_evento_id" class="form-control">
+                        <option value="">-- Nessuno (layout generico per la sala) --</option>
+                        {% for g in generi %}
+                        <option value="{{ g.id }}">{{ g.nome }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Numero File</label>
+                    <input type="number" name="file" min="1" max="26" required class="form-control">
+                </div>
+                <div class="form-group col-6">
+                    <label>Numero Colonne</label>
+                    <input type="number" name="colonne" min="1" required class="form-control">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Corridoi tra colonne <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(es. 3,6)</span></label>
+                    <input type="text" name="corridoio_colonne" class="form-control" placeholder="3,6" pattern="[0-9,]*">
+                </div>
+                <div class="form-group col-6">
+                    <label>Corridoi tra file <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(es. 5)</span></label>
+                    <input type="text" name="corridoio_file" class="form-control" placeholder="5" pattern="[0-9,]*">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px; font-weight:600;">
+                    <input type="checkbox" name="overbooking_abilitato" style="width:auto;">
+                    Abilita overbooking per questo layout
+                </label>
+                <small class="text-muted">
+                    Capienza normale sala: {{ sala_selezionata.posti_max }} posti.
+                    {% if sala_selezionata.overbooking_max %}
+                        Se abiliti, fino a {{ sala_selezionata.posti_max + sala_selezionata.overbooking_max }} posti.
+                    {% else %}
+                        Questa sala non ha un tetto di overbooking configurato (0): abilitare non avrà effetto finché non lo imposti sulla sala.
+                    {% endif %}
+                </small>
+            </div>
+
+            <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px; font-weight:600;">
+                    <input type="checkbox" name="is_default" style="width:auto;">
+                    Imposta come layout di default (per questa sala/genere)
+                </label>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Crea Layout</button>
+        </form>
+    </div>
+
+    <div class="prenotazioni-list">
+        <h3>Layout esistenti per "{{ sala_selezionata.nome }}" ({{ layouts|length }})</h3>
+        {% if layouts %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Nome</th>
+                    <th>Genere</th>
+                    <th>File × Colonne</th>
+                    <th>Posti</th>
+                    <th>Overbooking</th>
+                    <th>Default</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for l in layouts %}
+                <tr>
+                    <td>{{ l.nome }}</td>
+                    <td>{{ l.genere_evento.nome if l.genere_evento else '-' }}</td>
+                    <td>{{ l.file }} × {{ l.colonne }}</td>
+                    <td>{{ l.posti_totali }}</td>
+                    <td>{{ '✅' if l.overbooking_abilitato else '-' }}</td>
+                    <td>{{ '⭐ Default' if l.is_default else '' }}</td>
+                    <td style="display:flex; gap:6px;">
+                        {% if not l.is_default %}
+                        <form method="POST" action="{{ url_for('admin_layout_posti_set_default', layout_id=l.id) }}" style="display:inline;">
+                            <button type="submit" class="btn btn-sm btn-secondary">Imposta Default</button>
+                        </form>
+                        {% endif %}
+                        <form method="POST" action="{{ url_for('admin_layout_posti_delete', layout_id=l.id) }}" style="display:inline;" onsubmit="return confirm('Eliminare il layout &quot;{{ l.nome }}&quot;?');">
+                            <button type="submit" class="btn btn-sm btn-danger">Elimina</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>Nessun layout creato finora per questa sala.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <a href="{{ url_for('admin_generi') }}" class="btn btn-outline">Vai a Gestione Generi</a>
+    <a href="{{ url_for('calendar_view') }}" class="btn btn-outline">Torna al Calendario</a>
+</div>
+{% endblock %}

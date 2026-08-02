@@ -3,3 +3,4 @@
 .env.example
 config/secrets.js
 *.key
+.aider*

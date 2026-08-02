@@ -11,7 +11,7 @@ from flask_limiter.util import get_remote_address
 from sqlalchemy import func, or_, text, inspect
 from sqlalchemy.orm import joinedload
 from itsdangerous import URLSafeTimedSerializer
-from models import db, Utente, Sala, Evento, Prenotazione, Posto
+from models import db, Utente, Sala, Evento, Prenotazione, Posto, GenereEvento, LayoutPosti
 from config import Config
 
 app = Flask(__name__)
@@ -1262,6 +1262,230 @@ def api_seats_search(event_id):
                 })
 
     return jsonify({'matched': matched, 'count': len(matched), 'search': search})
+
+# ==================== GESTIONE GENERI EVENTO (Fase A) ====================
+
+@app.route('/admin/generi')
+@login_required
+def admin_generi():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    generi = GenereEvento.query.order_by(GenereEvento.nome).all()
+    return render_template('admin_generi.html', generi=generi)
+
+
+@app.route('/admin/generi/add', methods=['POST'])
+@login_required
+def admin_generi_add():
+    if not current_user.is_admin():
+        abort(403)
+
+    nome = request.form.get('nome', '').strip()
+    descrizione = request.form.get('descrizione', '').strip()
+
+    if not nome:
+        flash('Il nome del genere è obbligatorio.', 'danger')
+        return redirect(url_for('admin_generi'))
+
+    if GenereEvento.query.filter(func.lower(GenereEvento.nome) == nome.lower()).first():
+        flash(f"Esiste già un genere chiamato '{nome}'.", 'danger')
+        return redirect(url_for('admin_generi'))
+
+    genere = GenereEvento(nome=nome, descrizione=descrizione or None)
+    db.session.add(genere)
+    db.session.commit()
+    flash(f"Genere '{nome}' creato.", 'success')
+    return redirect(url_for('admin_generi'))
+
+
+@app.route('/admin/generi/delete/<int:genere_id>', methods=['POST'])
+@login_required
+def admin_generi_delete(genere_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    genere = db.session.get(GenereEvento, genere_id)
+    if not genere:
+        abort(404)
+
+    layout_collegati = LayoutPosti.query.filter_by(genere_evento_id=genere_id).count()
+    if layout_collegati > 0:
+        flash(
+            f"Impossibile eliminare '{genere.nome}': è collegato a {layout_collegati} layout esistenti. "
+            f"Scollega prima quei layout.",
+            'danger'
+        )
+        return redirect(url_for('admin_generi'))
+
+    nome = genere.nome
+    db.session.delete(genere)
+    db.session.commit()
+    flash(f"Genere '{nome}' eliminato.", 'success')
+    return redirect(url_for('admin_generi'))
+
+
+# ==================== GESTIONE LAYOUT POSTI (Fase A) ====================
+
+@app.route('/admin/layout-posti')
+@login_required
+def admin_layout_posti():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    sale = Sala.query.order_by(Sala.nome).all()
+    generi = GenereEvento.query.order_by(GenereEvento.nome).all()
+
+    sala_id = request.args.get('sala_id', type=int)
+    sala_selezionata = None
+    layouts = []
+
+    if sala_id:
+        sala_selezionata = db.session.get(Sala, sala_id)
+        if sala_selezionata:
+            layouts = LayoutPosti.query.filter_by(sala_id=sala_id) \
+                .order_by(LayoutPosti.is_default.desc(), LayoutPosti.nome).all()
+
+    return render_template(
+        'admin_layout_posti.html',
+        sale=sale, generi=generi,
+        sala_selezionata=sala_selezionata, layouts=layouts
+    )
+
+
+@app.route('/admin/layout-posti/add', methods=['POST'])
+@login_required
+def admin_layout_posti_add():
+    if not current_user.is_admin():
+        abort(403)
+
+    sala_id = request.form.get('sala_id', type=int)
+    genere_evento_id = request.form.get('genere_evento_id', type=int) or None
+    nome = request.form.get('nome', '').strip()
+    file = request.form.get('file', type=int)
+    colonne = request.form.get('colonne', type=int)
+    corridoio_colonne = request.form.get('corridoio_colonne', '').strip()
+    corridoio_file = request.form.get('corridoio_file', '').strip()
+    overbooking_abilitato = request.form.get('overbooking_abilitato') == 'on'
+    is_default = request.form.get('is_default') == 'on'
+
+    redirect_url = url_for('admin_layout_posti', sala_id=sala_id)
+
+    if not all([sala_id, nome, file, colonne]):
+        flash('Sala, nome, file e colonne sono campi obbligatori.', 'danger')
+        return redirect(redirect_url)
+
+    if file < 1 or file > 26 or colonne < 1:
+        flash('File deve essere tra 1 e 26, colonne almeno 1.', 'danger')
+        return redirect(redirect_url)
+
+    sala = db.session.get(Sala, sala_id)
+    if not sala:
+        flash('Sala non trovata.', 'danger')
+        return redirect(url_for('admin_layout_posti'))
+
+    posti_totali = file * colonne
+    limite = sala.posti_max + (sala.overbooking_max if overbooking_abilitato else 0)
+
+    if posti_totali > limite:
+        if overbooking_abilitato:
+            flash(
+                f"I posti calcolati ({posti_totali}) superano anche il limite di overbooking "
+                f"consentito per questa sala ({limite}).", 'danger'
+            )
+        else:
+            flash(
+                f"I posti calcolati ({posti_totali}) superano la capacità della sala ({sala.posti_max}). "
+                f"Abilita l'overbooking se vuoi superarla (fino a {sala.posti_max + sala.overbooking_max}).",
+                'danger'
+            )
+        return redirect(redirect_url)
+
+    layout = LayoutPosti(
+        sala_id=sala_id,
+        genere_evento_id=genere_evento_id,
+        nome=nome,
+        file=file,
+        colonne=colonne,
+        corridoio_colonne=corridoio_colonne,
+        corridoio_file=corridoio_file,
+        overbooking_abilitato=overbooking_abilitato,
+        is_default=False,
+        creato_da=current_user.id
+    )
+    db.session.add(layout)
+    db.session.flush()
+
+    if is_default:
+        _imposta_layout_default(layout)
+
+    db.session.commit()
+    flash(f"Layout '{nome}' creato.", 'success')
+    return redirect(redirect_url)
+
+
+@app.route('/admin/layout-posti/set-default/<int:layout_id>', methods=['POST'])
+@login_required
+def admin_layout_posti_set_default(layout_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    layout = db.session.get(LayoutPosti, layout_id)
+    if not layout:
+        abort(404)
+
+    _imposta_layout_default(layout)
+    db.session.commit()
+    flash(f"'{layout.nome}' impostato come layout di default.", 'success')
+    return redirect(url_for('admin_layout_posti', sala_id=layout.sala_id))
+
+
+@app.route('/admin/layout-posti/delete/<int:layout_id>', methods=['POST'])
+@login_required
+def admin_layout_posti_delete(layout_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    layout = db.session.get(LayoutPosti, layout_id)
+    if not layout:
+        abort(404)
+
+    sala_id = layout.sala_id
+    nome = layout.nome
+
+    eventi_collegati = Evento.query.filter_by(layout_posti_id=layout_id).count()
+    if eventi_collegati > 0:
+        flash(
+            f"Impossibile eliminare '{nome}': è stato usato per creare {eventi_collegati} eventi. "
+            f"Scollega prima quegli eventi se vuoi comunque procedere.",
+            'danger'
+        )
+        return redirect(url_for('admin_layout_posti', sala_id=sala_id))
+
+    try:
+        db.session.delete(layout)
+        db.session.commit()
+        flash(f"Layout '{nome}' eliminato.", 'success')
+    except Exception:
+        db.session.rollback()
+        flash(f"Impossibile eliminare '{nome}': è ancora referenziato altrove.", 'danger')
+
+    return redirect(url_for('admin_layout_posti', sala_id=sala_id))
+
+
+def _imposta_layout_default(layout):
+    """Resetta il flag is_default sugli altri layout della stessa sala+genere, e lo imposta su questo."""
+    altri = LayoutPosti.query.filter(
+        LayoutPosti.sala_id == layout.sala_id,
+        LayoutPosti.genere_evento_id == layout.genere_evento_id,
+        LayoutPosti.id != layout.id
+    ).all()
+    for altro in altri:
+        altro.is_default = False
+    layout.is_default = True
+
 
 # ==================== GUIDA ====================
 
