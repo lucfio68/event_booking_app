@@ -22,9 +22,9 @@
         <div class="nav-links">
             {% if current_user.is_authenticated %}
                 <span class="nav-user">Ciao, {{ current_user.nome_cognome }} ({{ current_user.tipo }})</span>
+                <a href="{{ url_for('calendar_view') }}" class="btn btn-primary">📅 Calendario</a>
                 <a href="{{ url_for('guida') }}" class="btn btn-guide" target="_blank">📖 Guida</a>
                 {% if current_user.is_admin() %}
-                    <a href="{{ url_for('create_event') }}" class="btn btn-primary">+ Crea Evento</a>
                     <a href="{{ url_for('admin_sale') }}" class="btn btn-secondary">🏛️ Sale</a>
                     <a href="{{ url_for('admin_layout_posti') }}" class="btn btn-secondary">🪑 Layout Posti</a>
                 {% endif %}
