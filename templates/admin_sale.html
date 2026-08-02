@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Gestione Sale{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <h2>🏛️ Gestione Sale</h2>
+    <p class="text-muted">Le sale sono gli spazi fisici dove si tengono gli eventi. Da qui puoi crearle e modificarle senza toccare il database.</p>
+
+    <div class="form-card">
+        <h3>{{ 'Modifica Sala "' ~ sala_da_modificare.nome ~ '"' if sala_da_modificare else 'Nuova Sala' }}</h3>
+        <form method="POST" action="{{ url_for('admin_sale_edit', sala_id=sala_da_modificare.id) if sala_da_modificare else url_for('admin_sale_add') }}">
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Nome *</label>
+                    <input type="text" name="nome" required class="form-control"
+                           value="{{ sala_da_modificare.nome if sala_da_modificare else '' }}"
+                           placeholder="es. Sala Conferenze A">
+                </div>
+                <div class="form-group col-6">
+                    <label>Indirizzo</label>
+                    <input type="text" name="indirizzo" class="form-control"
+                           value="{{ sala_da_modificare.indirizzo if sala_da_modificare else '' }}"
+                           placeholder="es. Via Roma 123, Milano">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Descrizione</label>
+                <textarea name="descrizione" rows="2" class="form-control"
+                          placeholder="Dettagli, dotazioni, note">{{ sala_da_modificare.descrizione if sala_da_modificare else '' }}</textarea>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Capienza massima (posti) *</label>
+                    <input type="number" name="posti_max" min="1" required class="form-control"
+                           value="{{ sala_da_modificare.posti_max if sala_da_modificare else '' }}">
+                </div>
+                <div class="form-group col-6">
+                    <label>Tetto overbooking <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(posti extra oltre la capienza, 0 = disabilitato)</span></label>
+                    <input type="number" name="overbooking_max" min="0" class="form-control"
+                           value="{{ sala_da_modificare.overbooking_max if sala_da_modificare else 0 }}">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Email amministratori <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(separate da virgola, per notifiche)</span></label>
+                <input type="text" name="email_admin" class="form-control"
+                       value="{{ sala_da_modificare.email_admin if sala_da_modificare else '' }}"
+                       placeholder="admin1@example.com, admin2@example.com">
+            </div>
+
+            <button type="submit" class="btn btn-primary">{{ 'Salva Modifiche' if sala_da_modificare else 'Crea Sala' }}</button>
+            {% if sala_da_modificare %}
+            <a href="{{ url_for('admin_sale') }}" class="btn btn-secondary">Annulla</a>
+            {% endif %}
+        </form>
+    </div>
+
+    <div class="prenotazioni-list">
+        <h3>Sale esistenti ({{ sale|length }})</h3>
+        {% if sale %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Nome</th>
+                    <th>Indirizzo</th>
+                    <th>Capienza</th>
+                    <th>Overbooking</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in sale %}
+                <tr>
+                    <td>{{ s.nome }}</td>
+                    <td>{{ s.indirizzo or '-' }}</td>
+                    <td>{{ s.posti_max }}</td>
+                    <td>{{ ('+' ~ s.overbooking_max) if s.overbooking_max else '-' }}</td>
+                    <td style="display:flex; gap:6px;">
+                        <a href="{{ url_for('admin_sale', modifica=s.id) }}" class="btn btn-sm btn-secondary">Modifica</a>
+                        <form method="POST" action="{{ url_for('admin_sale_delete', sala_id=s.id) }}" style="display:inline;" onsubmit="return confirm('Eliminare la sala &quot;{{ s.nome }}&quot;?');">
+                            <button type="submit" class="btn btn-sm btn-danger">Elimina</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>Nessuna sala creata finora.</p>
+        {% endif %}
+    </div>
+
+    <a href="{{ url_for('admin_layout_posti') }}" class="btn btn-outline">Vai a Gestione Layout Posti</a>
+    <a href="{{ url_for('calendar_view') }}" class="btn btn-outline">Torna al Calendario</a>
+</div>
+{% endblock %}

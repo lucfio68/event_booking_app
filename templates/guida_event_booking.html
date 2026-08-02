@@ -291,7 +291,7 @@
 <header>
     <h1>📖 Guida EventBooking</h1>
     <p>Manuale completo per utenti e amministratori</p>
-    <span class="version-badge">v1.4</span>
+    <span class="version-badge">v1.5</span>
     {% if current_user.is_authenticated and not current_user.is_admin() %}
     <p style="margin-top:8px; font-size:0.85em; opacity:0.8;">Stai visualizzando la guida in versione <strong>Utente</strong>. Le sezioni riservate agli amministratori sono nascoste.</p>
     {% endif %}
@@ -317,13 +317,16 @@
         <li><a href="#admin-email">3.3 Configurazione Email</a></li>
         <li><a href="#admin-avvio">3.4 Primo Avvio</a></li>
         <li><a href="#admin-sale">3.5 Gestione Sale</a></li>
-        <li><a href="#admin-eventi">3.6 Creazione Eventi</a></li>
-        <li><a href="#admin-prenotazioni">3.7 Gestione Prenotazioni</a></li>
-        <li><a href="#admin-ricerca">3.8 Ricerca e Filtri</a></li>
-        <li><a href="#admin-abbonato">3.9 Posti Abbonato</a></li>
-        <li><a href="#admin-riserva">3.10 Riservare Posti</a></li>
-        <li><a href="#admin-cancella">3.11 Cancellare Prenotazioni</a></li>
+        <li><a href="#admin-generi">3.6 Generi Evento</a></li>
+        <li><a href="#admin-layout-posti">3.7 Layout Posti</a></li>
+        <li><a href="#admin-eventi">3.8 Creazione Eventi</a></li>
+        <li><a href="#admin-prenotazioni">3.9 Gestione Prenotazioni</a></li>
+        <li><a href="#admin-ricerca">3.10 Ricerca e Filtri</a></li>
+        <li><a href="#admin-abbonato">3.11 Posti Abbonato</a></li>
+        <li><a href="#admin-riserva">3.12 Riservare Posti</a></li>
+        <li><a href="#admin-cancella">3.13 Cancellare Prenotazioni</a></li>
         <li><a href="#schema">4. Schema Database</a></li>
+        <li><a href="#faq-overbooking">4.1 Overbooking — come funziona</a></li>
         {% endif %}
         <li><a href="#faq">5. FAQ e Troubleshooting</a></li>
         {% if current_user.is_admin() %}
@@ -773,38 +776,90 @@ source venv/bin/activate    (Linux/Mac)</pre>
 
 <div class="section" id="admin-sale">
     <h2><span class="badge badge-admin">Admin</span> 3.5 Gestione Sale</h2>
-    <p>Le sale sono gli spazi fisici dove si tengono gli eventi.</p>
-    <div class="alert alert-info">
-        <strong>Nota:</strong> Al momento la creazione delle sale richiede l'inserimento diretto nel database o tramite script.
-    </div>
-    <h3>Inserire una sala tramite Python</h3>
-    <pre>from app import app
-from models import db, Sala
+    <p>Le sale sono gli spazi fisici dove si tengono gli eventi. Si gestiscono dalla pagina <strong>🏛️ Sale</strong> in navbar.</p>
 
-with app.app_context():
-    sala = Sala(
-        nome="Sala Conferenze A",
-        descrizione="Sala principale con proiettore e audio",
-        indirizzo="Via Roma 123, Milano",
-        posti_max=120,
-        email_admin="admin1@example.com, admin2@example.com"
-    )
-    db.session.add(sala)
-    db.session.commit()
-    print(f"Sala '{sala.nome}' creata con ID {sala.id}")</pre>
-    <h3>Campi della tabella Sala</h3>
-    <table>
-        <tr><th>Campo</th><th>Tipo</th><th>Descrizione</th></tr>
-        <tr><td>nome</td><td>Testo</td><td>Nome identificativo della sala</td></tr>
-        <tr><td>descrizione</td><td>Testo</td><td>Dettagli, dotazioni, note</td></tr>
-        <tr><td>indirizzo</td><td>Testo</td><td>Indirizzo fisico della sala</td></tr>
-        <tr><td>posti_max</td><td>Intero</td><td>Capacita' massima totale</td></tr>
-        <tr><td>email_admin</td><td>Testo</td><td>Email separate da virgola per notifiche</td></tr>
-    </table>
+    <h3>Creare una sala</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Vai su "🏛️ Sale"</h4>
+            <p>Compila il form "Nuova Sala": nome, indirizzo (opzionale), descrizione (opzionale), capienza massima, tetto di overbooking, email amministratori per notifiche.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Capienza massima e overbooking</h4>
+            <p>La <strong>capienza massima</strong> è il limite normale di posti per quella sala. Il <strong>tetto di overbooking</strong> è quanti posti extra oltre quel limite si possono eventualmente concedere (0 = overbooking disabilitato per questa sala) — va comunque poi abilitato esplicitamente su ogni singolo Layout Posti o Evento, non si applica mai automaticamente.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Salva</h4>
+            <p>Clicca <strong>Crea Sala</strong>. La sala comparirà subito nell'elenco e sarà selezionabile in Layout Posti e in Creazione Evento.</p>
+        </div>
+    </div>
+
+    <h3>Modificare o eliminare una sala</h3>
+    <p>Dall'elenco, <strong>Modifica</strong> precompila il form con i dati esistenti. <strong>Elimina</strong> è bloccato se la sala ha eventi o layout posti collegati — vanno rimossi prima quelli, per evitare cancellazioni accidentali di prenotazioni.</p>
+    <div class="alert alert-warning">
+        <strong>Nota:</strong> se riduci la capienza massima o il tetto di overbooking sotto la dimensione di un layout già esistente per quella sala, il layout esistente non viene toccato, ma riceverai un avviso — non potrai crearne di nuovi sopra il nuovo limite finché non lo alzi di nuovo.
+    </div>
+</div>
+
+<div class="section" id="admin-generi">
+    <h2><span class="badge badge-admin">Admin</span> 3.6 Generi Evento</h2>
+    <p>I <strong>generi</strong> (es. "Concerto", "Conferenza", "Teatro") permettono di avere <strong>layout posti diversi per tipologia di evento</strong> nella stessa sala — ad esempio meno file con più corridoi per un concerto, tutte le file piene per una conferenza. Si gestiscono dalla pagina <strong>Gestione Generi</strong> (raggiungibile dal fondo della pagina Layout Posti).</p>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Crea un genere</h4>
+            <p>Nome (obbligatorio) e descrizione (opzionale). È un'etichetta libera, associabile poi a uno o più Layout Posti.</p>
+        </div>
+    </div>
+    <div class="alert alert-info">
+        <strong>Nota:</strong> il genere è opzionale — un Layout Posti può anche non avere nessun genere associato ("layout generico per la sala"), utile se non ti serve questa distinzione.
+    </div>
+    <p><strong>Eliminazione:</strong> bloccata se il genere è ancora usato da uno o più layout esistenti — scollega prima quei layout.</p>
+</div>
+
+<div class="section" id="admin-layout-posti">
+    <h2><span class="badge badge-admin">Admin</span> 3.7 Layout Posti</h2>
+    <p>Un <strong>Layout Posti</strong> è una disposizione di sala riutilizzabile (file, colonne, corridoi) salvata una volta e richiamabile ogni volta che crei un evento, invece di reinserire gli stessi numeri manualmente. Si gestisce dalla pagina <strong>🪑 Layout Posti</strong> in navbar.</p>
+
+    <h3>Creare un layout</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Seleziona la sala</h4>
+            <p>Dal menu a tendina in alto. Comparirà il form per creare un nuovo layout per quella sala specifica.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Configura</h4>
+            <p>Nome del layout (es. "Platea intera"), genere opzionale, numero file e colonne, corridoi (stessa sintassi già vista in creazione evento: numeri separati da virgola).</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Overbooking e Default</h4>
+            <p>Spunta <strong>"Abilita overbooking"</strong> solo se vuoi che questo specifico layout possa superare la capienza normale della sala (fino al tetto impostato sulla sala stessa — se il tetto è 0, il checkbox non avrà effetto). Spunta <strong>"Imposta come layout di default"</strong> se vuoi che venga proposto automaticamente in fase di creazione evento per quella sala/genere — un solo layout può essere default per ogni combinazione sala+genere, impostarne uno nuovo toglie automaticamente il flag al precedente.</p>
+        </div>
+    </div>
+
+    <h3>Gestire i layout esistenti</h3>
+    <p>Dalla tabella puoi <strong>impostare come default</strong> un layout diverso, oppure <strong>eliminarlo</strong> — bloccato se è già stato usato per creare uno o più eventi (per non rompere la tracciabilità di eventi già esistenti).</p>
+    <div class="alert alert-info">
+        <strong>Perché conviene usarli:</strong> una volta configurati i layout per una sala, la creazione di un nuovo evento diventa molto più rapida — basta scegliere il layout giusto invece di reinserire file/colonne/corridoi ogni volta.
+    </div>
 </div>
 
 <div class="section" id="admin-eventi">
-    <h2><span class="badge badge-admin">Admin</span> 3.6 Creazione Eventi</h2>
+    <h2><span class="badge badge-admin">Admin</span> 3.8 Creazione Eventi</h2>
     <p>Gli amministratori possono creare eventi selezionando una data futura dal calendario.</p>
     <h3>Procedura</h3>
     <div class="step">
@@ -856,10 +911,13 @@ with app.app_context():
         </div>
     </div>
     <div class="screenshot">[Screenshot: Modulo creazione evento]</div>
+    <div class="alert alert-info">
+        <strong>Suggerimento:</strong> se hai già configurato dei <a href="#admin-layout-posti">Layout Posti</a> per questa sala (sezione 3.7), puoi copiarne i valori (file, colonne, corridoi) qui nel modulo invece di ricalcolarli da zero. L'integrazione diretta "scegli layout dal menu" nel modulo di creazione evento è prevista in un prossimo aggiornamento.
+    </div>
 </div>
 
 <div class="section" id="admin-prenotazioni">
-    <h2><span class="badge badge-admin">Admin</span> 3.7 Gestione Prenotazioni</h2>
+    <h2><span class="badge badge-admin">Admin</span> 3.9 Gestione Prenotazioni</h2>
     <p>Gli amministratori possono visualizzare lo stato di tutti i posti e accedere ai dettagli.</p>
     <h3>Visualizzare i posti prenotati</h3>
     <div class="step">
@@ -931,7 +989,7 @@ with app.app_context():
 </div>
 
 <div class="section" id="admin-ricerca">
-    <h2><span class="badge badge-admin">Admin</span> 3.8 Ricerca e Filtri</h2>
+    <h2><span class="badge badge-admin">Admin</span> 3.10 Ricerca e Filtri</h2>
     <p>Nella pagina di gestione evento, gli admin possono cercare le prenotazioni.</p>
     <h3>Come funziona la ricerca</h3>
     <div class="step">
@@ -959,7 +1017,7 @@ with app.app_context():
 </div>
 
 <div class="section" id="admin-abbonato">
-    <h2><span class="badge badge-admin">Admin</span> 3.9 Posti Abbonato</h2>
+    <h2><span class="badge badge-admin">Admin</span> 3.11 Posti Abbonato</h2>
     <p>I posti <strong>Abbonato</strong> sono una tipologia speciale di posto riservato, gestibile esclusivamente dagli amministratori. Funzionano in modo simile ai posti "Riservati" ma con un colore distintivo (viola) per identificarli facilmente nella mappa della sala.</p>
 
     <h3>Caratteristiche</h3>
@@ -1009,7 +1067,7 @@ with app.app_context():
 </div>
 
 <div class="section" id="admin-riserva">
-    <h2><span class="badge badge-admin">Admin</span> 3.10 Riservare Posti</h2>
+    <h2><span class="badge badge-admin">Admin</span> 3.12 Riservare Posti</h2>
     <p>I posti <strong>Riservati</strong> permettono di bloccare temporaneamente uno o più posti senza associarli a una prenotazione utente vera e propria (es. per staff, ospiti, posti tecnici).</p>
 
     <h3>Procedura per riservare posti</h3>
@@ -1047,7 +1105,7 @@ with app.app_context():
 </div>
 
 <div class="section" id="admin-cancella">
-    <h2><span class="badge badge-admin">Admin</span> 3.11 Cancellare Prenotazioni</h2>
+    <h2><span class="badge badge-admin">Admin</span> 3.13 Cancellare Prenotazioni</h2>
     <p>Gli amministratori possono cancellare posti prenotati, riservati o abbonati direttamente dalla mappa della sala.</p>
 
     <h3>Procedura di cancellazione</h3>
@@ -1194,7 +1252,31 @@ with app.app_context():
         <li><code>evento</code> -> <code>prenotazione</code> (1:N)</li>
         <li><code>utente</code> -> <code>prenotazione</code> (1:N)</li>
         <li><code>prenotazione</code> -> <code>posto</code> (1:N)</li>
+        <li><code>sala</code> -> <code>layout_posti</code> (1:N)</li>
+        <li><code>genere_evento</code> -> <code>layout_posti</code> (1:N, opzionale)</li>
+        <li><code>layout_posti</code> -> <code>evento</code> (1:N, tracciabilità)</li>
     </ul>
+</div>
+
+<div class="section" id="faq-overbooking">
+    <h2><span class="badge badge-admin">Admin</span> 4.1 Overbooking — come funziona</h2>
+    <p>L'overbooking permette di superare la capienza normale di una sala in casi eccezionali, ma è sempre a due livelli, mai automatico:</p>
+    <table>
+        <tr><th>Livello</th><th>Dove si imposta</th><th>Significato</th></tr>
+        <tr>
+            <td><strong>Tetto massimo</strong></td>
+            <td>Campo "Tetto overbooking" in <a href="#admin-sale">Gestione Sale</a></td>
+            <td>Quanto è possibile <em>al massimo</em> per quella sala (0 = overbooking impossibile, a prescindere da tutto il resto)</td>
+        </tr>
+        <tr>
+            <td><strong>Attivazione esplicita</strong></td>
+            <td>Checkbox "Abilita overbooking" in <a href="#admin-layout-posti">Layout Posti</a> (e in futuro anche in Creazione Evento)</td>
+            <td>Se non spuntato, il limite resta quello normale anche se la sala consente overbooking</td>
+        </tr>
+    </table>
+    <div class="alert alert-info">
+        <strong>Esempio:</strong> una sala ha capienza 100 e tetto overbooking 20 (quindi fino a 120 in totale). Se crei un layout <em>senza</em> spuntare "Abilita overbooking", resti comunque vincolato a 100 posti. Solo spuntando la casella potrai arrivare fino a 120.
+    </div>
 </div>
 {% endif %}
 
@@ -1263,6 +1345,15 @@ with app.app_context():
 <div class="section" id="changelog">
     <h2>📝 6. Changelog</h2>
 
+    <h3>v1.5 (2026)</h3>
+    <ul>
+        <li><strong>Nuovo:</strong> Gestione Sale via interfaccia web (creazione, modifica, eliminazione) — prima richiedeva accesso diretto al database</li>
+        <li><strong>Nuovo:</strong> Generi Evento (es. "Concerto", "Conferenza") per differenziare i layout posti per tipologia di evento nella stessa sala</li>
+        <li><strong>Nuovo:</strong> Layout Posti riutilizzabili per sala, con possibilità di impostarne uno di default per sala/genere</li>
+        <li><strong>Nuovo:</strong> Sistema di overbooking a due livelli: tetto massimo configurabile per sala, attivazione esplicita per ogni layout (mai automatica)</li>
+        <li><strong>Update:</strong> Documentata la nuova numerazione delle sezioni Admin (3.5-3.13) e aggiunta la sezione di riepilogo sull'overbooking (4.1)</li>
+    </ul>
+
     <h3>v1.4 (2026)</h3>
     <ul>
         <li><strong>Fix:</strong> Nella pagina "Gestisci", le caselle dei posti mostravano il nome dell'account che aveva prenotato invece del nome scelto per la prenotazione (campo <code>nome_prenotazione</code>), a differenza della pagina "Prenota" dove il comportamento era già corretto. Ora entrambe le viste mostrano coerentemente il nome della prenotazione</li>
@@ -1311,7 +1402,7 @@ with app.app_context():
 {% endif %}
 
 <footer>
-    <p>📘 Guida EventBooking v1.4</p>
+    <p>📘 Guida EventBooking v1.5</p>
     <p>Per supporto, aggiornamenti o segnalazione bug, contatta l'amministratore di sistema.</p>
     <p style="margin-top:10px;"><a href="#" onclick="openCredits(); return false;" style="color:var(--accent);">Credits</a></p>
 </footer>
@@ -1337,7 +1428,7 @@ with app.app_context():
             <small>(Anthropic)</small>
         </p>
         <p style="margin-top:20px; color:#666; font-size:0.9em;">
-            Versione 1.4 · 2026
+            Versione 1.5 · 2026
         </p>
     </div>
 </div>

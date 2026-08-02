@@ -1487,6 +1487,151 @@ def _imposta_layout_default(layout):
     layout.is_default = True
 
 
+# ==================== GESTIONE SALE ====================
+
+@app.route('/admin/sale')
+@login_required
+def admin_sale():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    sale = Sala.query.order_by(Sala.nome).all()
+    modifica_id = request.args.get('modifica', type=int)
+    sala_da_modificare = db.session.get(Sala, modifica_id) if modifica_id else None
+
+    return render_template('admin_sale.html', sale=sale, sala_da_modificare=sala_da_modificare)
+
+
+@app.route('/admin/sale/add', methods=['POST'])
+@login_required
+def admin_sale_add():
+    if not current_user.is_admin():
+        abort(403)
+
+    nome = request.form.get('nome', '').strip()
+    descrizione = request.form.get('descrizione', '').strip()
+    indirizzo = request.form.get('indirizzo', '').strip()
+    posti_max = request.form.get('posti_max', type=int)
+    overbooking_max = request.form.get('overbooking_max', type=int) or 0
+    email_admin = request.form.get('email_admin', '').strip()
+
+    if not nome or not posti_max:
+        flash('Nome e capienza massima sono campi obbligatori.', 'danger')
+        return redirect(url_for('admin_sale'))
+
+    if posti_max < 1:
+        flash('La capienza massima deve essere almeno 1.', 'danger')
+        return redirect(url_for('admin_sale'))
+
+    if overbooking_max < 0:
+        flash('Il tetto di overbooking non può essere negativo.', 'danger')
+        return redirect(url_for('admin_sale'))
+
+    sala = Sala(
+        nome=nome,
+        descrizione=descrizione or None,
+        indirizzo=indirizzo or None,
+        posti_max=posti_max,
+        overbooking_max=overbooking_max,
+        email_admin=email_admin or None
+    )
+    db.session.add(sala)
+    db.session.commit()
+    flash(f"Sala '{nome}' creata.", 'success')
+    return redirect(url_for('admin_sale'))
+
+
+@app.route('/admin/sale/edit/<int:sala_id>', methods=['POST'])
+@login_required
+def admin_sale_edit(sala_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    sala = db.session.get(Sala, sala_id)
+    if not sala:
+        abort(404)
+
+    nome = request.form.get('nome', '').strip()
+    descrizione = request.form.get('descrizione', '').strip()
+    indirizzo = request.form.get('indirizzo', '').strip()
+    posti_max = request.form.get('posti_max', type=int)
+    overbooking_max = request.form.get('overbooking_max', type=int) or 0
+    email_admin = request.form.get('email_admin', '').strip()
+
+    if not nome or not posti_max:
+        flash('Nome e capienza massima sono campi obbligatori.', 'danger')
+        return redirect(url_for('admin_sale', modifica=sala_id))
+
+    if posti_max < 1:
+        flash('La capienza massima deve essere almeno 1.', 'danger')
+        return redirect(url_for('admin_sale', modifica=sala_id))
+
+    if overbooking_max < 0:
+        flash('Il tetto di overbooking non può essere negativo.', 'danger')
+        return redirect(url_for('admin_sale', modifica=sala_id))
+
+    # Se riduci posti_max/overbooking_max sotto la capienza di layout/eventi già configurati,
+    # non blocchiamo qui (i layout/eventi esistenti restano come sono), ma avvisiamo l'admin.
+    max_layout_esistente = db.session.query(func.max(LayoutPosti.file * LayoutPosti.colonne)) \
+        .filter(LayoutPosti.sala_id == sala_id).scalar()
+    nuovo_limite = posti_max + overbooking_max
+    if max_layout_esistente and max_layout_esistente > nuovo_limite:
+        flash(
+            f"Attenzione: esiste già un layout per questa sala con {max_layout_esistente} posti, "
+            f"superiore al nuovo limite ({nuovo_limite}). Il layout resta invariato, ma non potrai "
+            f"crearne altri sopra il nuovo limite finché non lo alzi di nuovo.",
+            'warning'
+        )
+
+    sala.nome = nome
+    sala.descrizione = descrizione or None
+    sala.indirizzo = indirizzo or None
+    sala.posti_max = posti_max
+    sala.overbooking_max = overbooking_max
+    sala.email_admin = email_admin or None
+    db.session.commit()
+    flash(f"Sala '{nome}' aggiornata.", 'success')
+    return redirect(url_for('admin_sale'))
+
+
+@app.route('/admin/sale/delete/<int:sala_id>', methods=['POST'])
+@login_required
+def admin_sale_delete(sala_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    sala = db.session.get(Sala, sala_id)
+    if not sala:
+        abort(404)
+
+    eventi_collegati = Evento.query.filter_by(sala_id=sala_id).count()
+    layout_collegati = LayoutPosti.query.filter_by(sala_id=sala_id).count()
+
+    if eventi_collegati > 0:
+        flash(
+            f"Impossibile eliminare '{sala.nome}': ha {eventi_collegati} eventi collegati "
+            f"(eliminandola verrebbero eliminati anche quelli e le relative prenotazioni). "
+            f"Elimina prima gli eventi se vuoi comunque procedere.",
+            'danger'
+        )
+        return redirect(url_for('admin_sale'))
+
+    if layout_collegati > 0:
+        flash(
+            f"Impossibile eliminare '{sala.nome}': ha {layout_collegati} layout posti collegati. "
+            f"Eliminali prima dalla Gestione Layout Posti.",
+            'danger'
+        )
+        return redirect(url_for('admin_sale'))
+
+    nome = sala.nome
+    db.session.delete(sala)
+    db.session.commit()
+    flash(f"Sala '{nome}' eliminata.", 'success')
+    return redirect(url_for('admin_sale'))
+
+
 # ==================== GUIDA ====================
 
 @app.route('/guida')
