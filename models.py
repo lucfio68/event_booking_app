@@ -35,6 +35,7 @@ class Sala(db.Model):
     descrizione = db.Column(db.Text, nullable=True)
     indirizzo = db.Column(db.String(255), nullable=True)
     posti_max = db.Column(db.Integer, nullable=False)
+    overbooking_max = db.Column(db.Integer, nullable=False, default=0)  # posti extra consentiti oltre posti_max (0 = nessun overbooking permesso)
     email_admin = db.Column(db.Text, nullable=True)
 
     eventi = db.relationship('Evento', backref='sala', lazy=True, cascade='all, delete-orphan')
@@ -59,6 +60,7 @@ class LayoutPosti(db.Model):
     corridoio_colonne = db.Column(db.String(50), nullable=True, default='')
     corridoio_file = db.Column(db.String(50), nullable=True, default='')
     is_default = db.Column(db.Boolean, default=False, nullable=False)
+    overbooking_abilitato = db.Column(db.Boolean, default=False, nullable=False)  # se True, questo layout può superare sala.posti_max (fino a +overbooking_max)
     creato_da = db.Column(db.Integer, db.ForeignKey('utente.id'), nullable=True)
     data_creazione = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -89,6 +91,7 @@ class Evento(db.Model):
     # Tracciabilità: da quale layout/genere è nato l'evento (i valori restano copiati sopra, invariati anche se il layout cambia in futuro)
     layout_posti_id = db.Column(db.Integer, db.ForeignKey('layout_posti.id'), nullable=True)
     genere_evento_id = db.Column(db.Integer, db.ForeignKey('genere_evento.id'), nullable=True)
+    overbooking_abilitato = db.Column(db.Boolean, default=False, nullable=False)  # se True, l'evento può superare sala.posti_max (fino a +overbooking_max); serve anche per abilitare aggiunte future oltre il limite
 
     posti = db.relationship('Posto', backref='evento', lazy=True, cascade='all, delete-orphan')
     prenotazioni = db.relationship('Prenotazione', backref='evento', lazy=True, cascade='all, delete-orphan')
