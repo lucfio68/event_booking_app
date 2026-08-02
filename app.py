@@ -1568,6 +1568,17 @@ def migrate_layout_posti():
         else:
             esiti.append("evento.overbooking_abilitato esiste già")
 
+        # === LAYOUT_POSTI (colonna aggiunta al modello dopo la prima creazione tabella) ===
+        layout_columns = [col['name'] for col in inspector.get_columns('layout_posti')]
+
+        if 'overbooking_abilitato' not in layout_columns:
+            db.session.execute(text(
+                "ALTER TABLE layout_posti ADD COLUMN overbooking_abilitato BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            aggiunte.append('layout_posti.overbooking_abilitato')
+        else:
+            esiti.append("layout_posti.overbooking_abilitato esiste già")
+
         if aggiunte:
             db.session.commit()
             return (
