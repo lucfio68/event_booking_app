@@ -8,7 +8,7 @@ from flask_login import LoginManager, login_user, logout_user, login_required, c
 from flask_mail import Mail, Message
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text, inspect
 from sqlalchemy.orm import joinedload
 from itsdangerous import URLSafeTimedSerializer
 from models import db, Utente, Sala, Evento, Prenotazione, Posto
@@ -1279,6 +1279,78 @@ def init_db():
         abort(403)
     db.create_all()
     return 'Database inizializzato!'
+
+# ==================== MIGRAZIONE LAYOUT POSTI (Fase A) ====================
+
+@app.route('/admin/migrate-layout-posti')
+@login_required
+def migrate_layout_posti():
+    if not current_user.is_admin():
+        abort(403)
+
+    esiti = []
+    aggiunte = []
+
+    try:
+        inspector = inspect(db.engine)
+        tables = inspector.get_table_names()
+
+        if 'layout_posti' not in tables or 'genere_evento' not in tables:
+            return (
+                "Le tabelle 'layout_posti' e/o 'genere_evento' non esistono ancora. "
+                "Visita <a href='/init-db'>/init-db</a> prima di eseguire questa migrazione."
+            ), 400
+
+        # === SALA ===
+        sala_columns = [col['name'] for col in inspector.get_columns('sala')]
+        if 'overbooking_max' not in sala_columns:
+            db.session.execute(text(
+                "ALTER TABLE sala ADD COLUMN overbooking_max INTEGER NOT NULL DEFAULT 0"
+            ))
+            aggiunte.append('sala.overbooking_max')
+        else:
+            esiti.append("sala.overbooking_max esiste già")
+
+        # === EVENTO ===
+        evento_columns = [col['name'] for col in inspector.get_columns('evento')]
+
+        if 'layout_posti_id' not in evento_columns:
+            db.session.execute(text(
+                "ALTER TABLE evento ADD COLUMN layout_posti_id INTEGER REFERENCES layout_posti(id)"
+            ))
+            aggiunte.append('evento.layout_posti_id')
+        else:
+            esiti.append("evento.layout_posti_id esiste già")
+
+        if 'genere_evento_id' not in evento_columns:
+            db.session.execute(text(
+                "ALTER TABLE evento ADD COLUMN genere_evento_id INTEGER REFERENCES genere_evento(id)"
+            ))
+            aggiunte.append('evento.genere_evento_id')
+        else:
+            esiti.append("evento.genere_evento_id esiste già")
+
+        if 'overbooking_abilitato' not in evento_columns:
+            db.session.execute(text(
+                "ALTER TABLE evento ADD COLUMN overbooking_abilitato BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            aggiunte.append('evento.overbooking_abilitato')
+        else:
+            esiti.append("evento.overbooking_abilitato esiste già")
+
+        if aggiunte:
+            db.session.commit()
+            return (
+                "✅ Migrazione completata!<br>"
+                f"Colonne aggiunte: {', '.join(aggiunte)}<br>"
+                f"{'<br>'.join(esiti)}"
+            )
+        else:
+            return "ℹ️ Nessuna migrazione necessaria, colonne già presenti.<br>" + '<br>'.join(esiti)
+
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
 
 if __name__ == '__main__':
     app.run()
