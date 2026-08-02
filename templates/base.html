@@ -22,7 +22,11 @@
         <div class="nav-links">
             {% if current_user.is_authenticated %}
                 <span class="nav-user">Ciao, {{ current_user.nome_cognome }} ({{ current_user.tipo }})</span>
-                <a href="{{ url_for('calendar_view') }}" class="btn btn-primary">📅 Calendario</a>
+                {% if current_user.is_admin() and request.endpoint == 'calendar_view' %}
+                    <a href="{{ url_for('create_event') }}" class="btn btn-primary">+ Crea Evento</a>
+                {% else %}
+                    <a href="{{ url_for('calendar_view') }}" class="btn btn-primary">📅 Calendario</a>
+                {% endif %}
                 <a href="{{ url_for('guida') }}" class="btn btn-guide" target="_blank">📖 Guida</a>
                 {% if current_user.is_admin() %}
                     <a href="{{ url_for('admin_sale') }}" class="btn btn-secondary">🏛️ Sale</a>
@@ -54,7 +58,7 @@
     // Registra Service Worker per PWA
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', function() {
-            navigator.serviceWorker.register('/static/service-worker.js')
+            navigator.serviceWorker.register('/static/js/service-worker.js')
                 .then(function(reg) { console.log('SW registrato:', reg.scope); })
                 .catch(function(err) { console.log('SW errore:', err); });
         });
