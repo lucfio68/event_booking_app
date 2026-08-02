@@ -40,6 +40,34 @@ class Sala(db.Model):
     eventi = db.relationship('Evento', backref='sala', lazy=True, cascade='all, delete-orphan')
     posti = db.relationship('Posto', backref='sala', lazy=True, cascade='all, delete-orphan')
 
+class GenereEvento(db.Model):
+    __tablename__ = 'genere_evento'
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(100), nullable=False)  # es. "Concerto", "Conferenza", "Teatro"
+    descrizione = db.Column(db.Text, nullable=True)
+
+    layout = db.relationship('LayoutPosti', backref='genere_evento', lazy=True)
+
+class LayoutPosti(db.Model):
+    __tablename__ = 'layout_posti'
+    id = db.Column(db.Integer, primary_key=True)
+    sala_id = db.Column(db.Integer, db.ForeignKey('sala.id'), nullable=False, index=True)
+    genere_evento_id = db.Column(db.Integer, db.ForeignKey('genere_evento.id'), nullable=True)  # NULL = layout generico per la sala
+    nome = db.Column(db.String(100), nullable=False)  # es. "Platea intera", "Solo prime 10 file"
+    file = db.Column(db.Integer, nullable=False)
+    colonne = db.Column(db.Integer, nullable=False)
+    corridoio_colonne = db.Column(db.String(50), nullable=True, default='')
+    corridoio_file = db.Column(db.String(50), nullable=True, default='')
+    is_default = db.Column(db.Boolean, default=False, nullable=False)
+    creato_da = db.Column(db.Integer, db.ForeignKey('utente.id'), nullable=True)
+    data_creazione = db.Column(db.DateTime, default=datetime.utcnow)
+
+    sala = db.relationship('Sala', backref=db.backref('layout_posti', lazy=True, cascade='all, delete-orphan'))
+
+    @property
+    def posti_totali(self):
+        return self.file * self.colonne
+
 class Evento(db.Model):
     __tablename__ = 'evento'
     id = db.Column(db.Integer, primary_key=True)
@@ -58,6 +86,9 @@ class Evento(db.Model):
     sala_id = db.Column(db.Integer, db.ForeignKey('sala.id'), nullable=False)
     creato_da = db.Column(db.Integer, db.ForeignKey('utente.id'), nullable=False)
     data_creazione = db.Column(db.DateTime, default=datetime.utcnow)
+    # Tracciabilità: da quale layout/genere è nato l'evento (i valori restano copiati sopra, invariati anche se il layout cambia in futuro)
+    layout_posti_id = db.Column(db.Integer, db.ForeignKey('layout_posti.id'), nullable=True)
+    genere_evento_id = db.Column(db.Integer, db.ForeignKey('genere_evento.id'), nullable=True)
 
     posti = db.relationship('Posto', backref='evento', lazy=True, cascade='all, delete-orphan')
     prenotazioni = db.relationship('Prenotazione', backref='evento', lazy=True, cascade='all, delete-orphan')
