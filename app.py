@@ -1277,6 +1277,9 @@ def guida():
 def init_db():
     if not current_user.is_admin():
         abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
     db.create_all()
     return 'Database inizializzato!'
 
@@ -1286,6 +1289,9 @@ def init_db():
 @login_required
 def migrate_layout_posti():
     if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
         abort(403)
 
     esiti = []

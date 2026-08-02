@@ -21,3 +21,7 @@ class Config:
     RESEND_FROM_EMAIL = os.environ.get('RESEND_FROM_EMAIL') or 'onboarding@resend.dev' or 'EventBooking <prenotazionilacorrente@gmail.com.com>'
     BREVO_API_KEY = os.environ.get('BREVO_API_KEY') or ''
     BREVO_FROM_EMAIL = os.environ.get('BREVO_FROM_EMAIL') or ''
+
+    # Chiave segreta richiesta (oltre al login admin) per le route di manutenzione DB
+    # (/init-db, /admin/migrate-layout-posti). Se non impostata, quelle route restano bloccate.
+    MIGRATION_SECRET = os.environ.get('MIGRATION_SECRET') or ''
