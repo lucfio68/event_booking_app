@@ -12,11 +12,36 @@
             <select name="sala_id" id="salaSelect" required class="form-control">
                 <option value="">-- Seleziona Sala --</option>
                 {% for sala in sale %}
-                <option value="{{ sala.id }}" data-posti="{{ sala.posti_max }}">{{ sala.nome }} (max {{ sala.posti_max }} posti)</option>
+                <option value="{{ sala.id }}" data-posti="{{ sala.posti_max }}" data-overbooking="{{ sala.overbooking_max }}">{{ sala.nome }} (max {{ sala.posti_max }} posti{% if sala.overbooking_max %}, +{{ sala.overbooking_max }} con overbooking{% endif %})</option>
                 {% endfor %}
             </select>
+            <div id="linkGestisciLayout" style="margin-top:8px; display:none;">
+                <a href="#" id="linkGestisciLayoutHref" target="_blank" style="font-size:0.9em;">📐 Gestisci layout per questa sala</a>
+            </div>
         </div>
-        
+
+        <div class="form-row">
+            <div class="form-group col-6">
+                <label>Genere Evento <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(opzionale)</span></label>
+                <select name="genere_evento_id" id="genereSelect" class="form-control">
+                    <option value="">-- Nessuno --</option>
+                    {% for g in generi %}
+                    <option value="{{ g.id }}">{{ g.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group col-6">
+                <label>Layout Posti</label>
+                <select id="layoutSelect" class="form-control">
+                    <option value="">-- Layout personalizzato --</option>
+                </select>
+                <small class="text-muted">Seleziona prima la sala per vedere i layout disponibili</small>
+            </div>
+        </div>
+
+        <input type="hidden" name="layout_id" id="layoutIdInput" value="">
+
+        <div id="customGridFields">
         <div class="form-row">
             <div class="form-group col-6">
                 <label>Numero File</label>
@@ -41,6 +66,13 @@
             </div>
         </div>
 
+        <div class="form-group">
+            <label>Salva questa griglia come nuovo layout <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(opzionale)</span></label>
+            <input type="text" name="salva_layout_nome" id="salvaLayoutNome" placeholder="Es. Platea Standard" class="form-control">
+            <small class="text-muted">Se compili questo campo, la griglia sopra verrà salvata come layout riutilizzabile per questa sala.</small>
+        </div>
+        </div>
+
         <!-- Preview layout con corridoi -->
         <div class="form-group" id="previewSection" style="display:none;">
             <label>Anteprima Layout</label>
@@ -54,6 +86,14 @@
             <label>Posti che verranno creati: <span id="calculatedSeats" class="badge">0</span></label>
             <small class="text-muted">Deve essere ≤ posti max della sala</small>
             <div id="seatsError" class="text-danger" style="display:none;">I posti superano la capacità della sala!</div>
+        </div>
+
+        <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px; font-weight:600;">
+                <input type="checkbox" name="overbooking_abilitato" id="overbookingCheckbox" style="width:auto;">
+                Abilita overbooking per questo evento
+            </label>
+            <small class="text-muted" id="overbookingHint">Seleziona una sala per vedere il tetto di overbooking disponibile.</small>
         </div>
         
         <div class="form-group">
@@ -87,6 +127,19 @@
 </div>
 
 <script>
+    const ALL_LAYOUTS = [
+        {% for l in layouts %}
+        {
+            id: {{ l.id }}, sala_id: {{ l.sala_id }}, nome: {{ l.nome|tojson }},
+            file: {{ l.file }}, colonne: {{ l.colonne }},
+            corridoio_colonne: {{ (l.corridoio_colonne or '')|tojson }},
+            corridoio_file: {{ (l.corridoio_file or '')|tojson }},
+            is_default: {{ 'true' if l.is_default else 'false' }},
+            genere_evento_id: {{ l.genere_evento_id or 'null' }}
+        },
+        {% endfor %}
+    ];
+
     document.addEventListener('DOMContentLoaded', function() {
         const urlParams = new URLSearchParams(window.location.search);
         const dateParam = urlParams.get('date');
@@ -95,23 +148,72 @@
         }
         
         const salaSelect = document.getElementById('salaSelect');
+        const genereSelect = document.getElementById('genereSelect');
+        const layoutSelect = document.getElementById('layoutSelect');
+        const layoutIdInput = document.getElementById('layoutIdInput');
+        const customGridFields = document.getElementById('customGridFields');
         const fileInput = document.getElementById('fileInput');
         const colonneInput = document.getElementById('colonneInput');
+        const corridoioColonneInput = document.getElementById('corridoioColonneInput');
+        const corridoioFileInput = document.getElementById('corridoioFileInput');
         const calculatedSeats = document.getElementById('calculatedSeats');
         const seatsError = document.getElementById('seatsError');
+        const overbookingCheckbox = document.getElementById('overbookingCheckbox');
+        const overbookingHint = document.getElementById('overbookingHint');
         const submitBtn = document.getElementById('submitBtn');
-        
+
+        function refreshLayoutOptions() {
+            const salaId = parseInt(salaSelect.value) || null;
+            layoutSelect.innerHTML = '<option value="">-- Layout personalizzato --</option>';
+            if (!salaId) return;
+            ALL_LAYOUTS.filter(function(l) { return l.sala_id === salaId; }).forEach(function(l) {
+                const opt = document.createElement('option');
+                opt.value = l.id;
+                opt.textContent = l.nome + ' (' + l.file + '×' + l.colonne + (l.is_default ? ', default' : '') + ')';
+                layoutSelect.appendChild(opt);
+            });
+        }
+
+        function applyLayoutSelection() {
+            const selectedId = parseInt(layoutSelect.value) || null;
+            if (!selectedId) {
+                // Layout personalizzato: mostra i campi griglia manuale
+                layoutIdInput.value = '';
+                customGridFields.style.display = '';
+                fileInput.required = true;
+                colonneInput.required = true;
+                calculateSeats();
+                return;
+            }
+            const layout = ALL_LAYOUTS.find(function(l) { return l.id === selectedId; });
+            if (!layout) return;
+            layoutIdInput.value = layout.id;
+            fileInput.value = layout.file;
+            colonneInput.value = layout.colonne;
+            corridoioColonneInput.value = layout.corridoio_colonne;
+            corridoioFileInput.value = layout.corridoio_file;
+            customGridFields.style.display = 'none';
+            fileInput.required = false;
+            colonneInput.required = false;
+            calculateSeats();
+        }
+
         function calculateSeats() {
             const file = parseInt(fileInput.value) || 0;
             const colonne = parseInt(colonneInput.value) || 0;
             const posti = file * colonne;
             calculatedSeats.textContent = posti;
-            
+
             const selectedOption = salaSelect.options[salaSelect.selectedIndex];
             const maxPosti = parseInt(selectedOption.dataset.posti) || 0;
-            
-            if (posti > 0 && maxPosti > 0 && posti > maxPosti) {
+            const maxOverbooking = parseInt(selectedOption.dataset.overbooking) || 0;
+            const limite = maxPosti + (overbookingCheckbox.checked ? maxOverbooking : 0);
+
+            if (posti > 0 && limite > 0 && posti > limite) {
                 seatsError.style.display = 'block';
+                seatsError.textContent = overbookingCheckbox.checked
+                    ? 'I posti superano anche il limite di overbooking (' + limite + ')!'
+                    : 'I posti superano la capacità della sala (' + maxPosti + ')' + (maxOverbooking ? '. Puoi abilitare l\'overbooking qui sopra.' : '!');
                 submitBtn.disabled = true;
             } else {
                 seatsError.style.display = 'none';
@@ -119,9 +221,36 @@
             }
         }
         
-        salaSelect.addEventListener('change', calculateSeats);
+        salaSelect.addEventListener('change', function() {
+            refreshLayoutOptions();
+            layoutSelect.value = '';
+            applyLayoutSelection();
+
+            const linkDiv = document.getElementById('linkGestisciLayout');
+            const linkHref = document.getElementById('linkGestisciLayoutHref');
+            if (salaSelect.value) {
+                linkHref.href = '/admin/layout-posti?sala_id=' + salaSelect.value;
+                linkDiv.style.display = 'block';
+
+                const selectedOption = salaSelect.options[salaSelect.selectedIndex];
+                const maxPosti = parseInt(selectedOption.dataset.posti) || 0;
+                const maxOverbooking = parseInt(selectedOption.dataset.overbooking) || 0;
+                if (maxOverbooking > 0) {
+                    overbookingHint.textContent = 'Se abiliti, capienza fino a ' + (maxPosti + maxOverbooking) + ' posti (invece di ' + maxPosti + ').';
+                } else {
+                    overbookingHint.textContent = 'Questa sala non ha un tetto di overbooking configurato: abilitare non avrà effetto.';
+                }
+            } else {
+                linkDiv.style.display = 'none';
+                overbookingHint.textContent = 'Seleziona una sala per vedere il tetto di overbooking disponibile.';
+            }
+        });
+        layoutSelect.addEventListener('change', applyLayoutSelection);
         fileInput.addEventListener('input', calculateSeats);
         colonneInput.addEventListener('input', calculateSeats);
+        overbookingCheckbox.addEventListener('change', calculateSeats);
+
+        refreshLayoutOptions();
     });
 </script>
 {% endblock %}

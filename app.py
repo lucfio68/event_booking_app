@@ -639,6 +639,10 @@ def create_event():
         sala_id = request.form.get('sala_id', type=int)
         file = request.form.get('file', type=int)
         colonne = request.form.get('colonne', type=int)
+        layout_id = request.form.get('layout_id', type=int) or None
+        genere_evento_id = request.form.get('genere_evento_id', type=int) or None
+        overbooking_abilitato = request.form.get('overbooking_abilitato') == 'on'
+        salva_layout_nome = request.form.get('salva_layout_nome', '').strip()
 
         if not all([nome, data_evento, ora_inizio, durata, sala_id, file, colonne]):
             flash('Tutti i campi sono obbligatori.', 'danger')
@@ -652,9 +656,29 @@ def create_event():
             flash('Sala non trovata.', 'danger')
             return redirect(url_for('create_event'))
 
+        # Se è stato scelto un layout salvato, verifica che appartenga davvero a questa sala
+        layout_scelto = None
+        if layout_id:
+            layout_scelto = db.session.get(LayoutPosti, layout_id)
+            if not layout_scelto or layout_scelto.sala_id != sala_id:
+                layout_scelto = None
+                layout_id = None
+
         posti_max = file * colonne
-        if posti_max > sala.posti_max:
-            flash(f"I posti creati ({posti_max}) superano la capacita' della sala ({sala.posti_max}).", 'danger')
+        limite = sala.posti_max + (sala.overbooking_max if overbooking_abilitato else 0)
+
+        if posti_max > limite:
+            if overbooking_abilitato:
+                flash(
+                    f"I posti calcolati ({posti_max}) superano anche il limite di overbooking "
+                    f"consentito per questa sala ({limite}).", 'danger'
+                )
+            else:
+                flash(
+                    f"I posti calcolati ({posti_max}) superano la capacita' della sala ({sala.posti_max}). "
+                    f"Abilita l'overbooking se vuoi superarla (fino a {sala.posti_max + sala.overbooking_max}).",
+                    'danger'
+                )
             return redirect(url_for('create_event'))
 
         try:
@@ -681,10 +705,29 @@ def create_event():
             ora_inizio=ora_obj, durata=durata, posti_max=posti_max,
             file=file, colonne=colonne,
             corridoio_colonne=corridoio_colonne, corridoio_file=corridoio_file,
-            sala_id=sala_id, creato_da=current_user.id
+            sala_id=sala_id, creato_da=current_user.id,
+            layout_posti_id=layout_id, genere_evento_id=genere_evento_id,
+            overbooking_abilitato=overbooking_abilitato
         )
         db.session.add(evento)
         db.session.flush()
+
+        # Se non è stato scelto un layout esistente e l'admin ha indicato un nome,
+        # salva questa griglia come nuovo layout riutilizzabile per questa sala.
+        if not layout_id and salva_layout_nome:
+            nuovo_layout = LayoutPosti(
+                sala_id=sala_id,
+                genere_evento_id=genere_evento_id,
+                nome=salva_layout_nome,
+                file=file, colonne=colonne,
+                corridoio_colonne=corridoio_colonne, corridoio_file=corridoio_file,
+                overbooking_abilitato=overbooking_abilitato,
+                is_default=False,
+                creato_da=current_user.id
+            )
+            db.session.add(nuovo_layout)
+            db.session.flush()
+            evento.layout_posti_id = nuovo_layout.id
 
         numero = 1
         posti_bulk = []
@@ -702,8 +745,13 @@ def create_event():
         flash('Evento creato con successo!', 'success')
         return redirect(url_for('calendar_view'))
 
-    sale = Sala.query.all()
-    return render_template('event_create.html', sale=sale, today=date.today().strftime('%Y-%m-%d'))
+    sale = Sala.query.order_by(Sala.nome).all()
+    generi = GenereEvento.query.order_by(GenereEvento.nome).all()
+    layouts = LayoutPosti.query.all()
+    return render_template(
+        'event_create.html', sale=sale, generi=generi, layouts=layouts,
+        today=date.today().strftime('%Y-%m-%d')
+    )
 
 # ==================== ELIMINA EVENTO (ADMIN) ====================
 

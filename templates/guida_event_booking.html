@@ -291,7 +291,7 @@
 <header>
     <h1>📖 Guida EventBooking</h1>
     <p>Manuale completo per utenti e amministratori</p>
-    <span class="version-badge">v1.5</span>
+    <span class="version-badge">v1.6</span>
     {% if current_user.is_authenticated and not current_user.is_admin() %}
     <p style="margin-top:8px; font-size:0.85em; opacity:0.8;">Stai visualizzando la guida in versione <strong>Utente</strong>. Le sezioni riservate agli amministratori sono nascoste.</p>
     {% endif %}
@@ -860,60 +860,52 @@ source venv/bin/activate    (Linux/Mac)</pre>
 
 <div class="section" id="admin-eventi">
     <h2><span class="badge badge-admin">Admin</span> 3.8 Creazione Eventi</h2>
-    <p>Gli amministratori possono creare eventi selezionando una data futura dal calendario.</p>
+    <p>Gli amministratori possono creare eventi solo dal calendario (non c'è più un accesso diretto in navbar) — così la data di riferimento è sempre chiara fin dall'inizio.</p>
     <h3>Procedura</h3>
     <div class="step">
         <div class="step-num">1</div>
         <div class="step-content">
             <h4>Seleziona la data</h4>
-            <p>Dal calendario, clicca su un giorno <strong>futuro</strong>.</p>
+            <p>Dal calendario, clicca su un giorno <strong>futuro</strong>, poi clicca il bottone <strong>Crea Evento</strong> che appare sotto (oppure, se sei già sulla pagina Calendario, il tasto in navbar diventa direttamente <strong>"+ Crea Evento"</strong> — in quel caso la data non è precompilata, la scegli tu nel modulo).</p>
         </div>
     </div>
     <div class="step">
         <div class="step-num">2</div>
         <div class="step-content">
-            <h4>Clicca "Crea Evento"</h4>
-            <p>Verrai reindirizzato al modulo di creazione con la data precompilata.</p>
+            <h4>Seleziona Sala, Genere e Layout</h4>
+            <table>
+                <tr><th>Campo</th><th>Descrizione</th></tr>
+                <tr><td>Sala</td><td>Seleziona la sala dall'elenco. Appare anche il link "📐 Gestisci layout per questa sala" per aprire in una nuova scheda la gestione layout, se serve configurarne uno al volo</td></tr>
+                <tr><td>Genere Evento</td><td>Opzionale — es. "Concerto", "Conferenza"</td></tr>
+                <tr><td>Layout Posti</td><td>Se la sala ha layout salvati, scegline uno per precompilare automaticamente file/colonne/corridoi, oppure lascia "Layout personalizzato" per inserirli a mano</td></tr>
+            </table>
         </div>
     </div>
     <div class="step">
         <div class="step-num">3</div>
         <div class="step-content">
-            <h4>Compila il modulo</h4>
-            <table>
-                <tr><th>Campo</th><th>Descrizione</th></tr>
-                <tr><td>Sala</td><td>Seleziona la sala dall'elenco</td></tr>
-                <tr><td>Numero File</td><td>Quante file di posti (max 26, corrispondono alle lettere A-Z)</td></tr>
-                <tr><td>Numero Colonne</td><td>Quante colonne per fila</td></tr>
-                <tr><td>Nome Evento</td><td>Titolo dell'evento</td></tr>
-                <tr><td>Descrizione</td><td>Dettagli opzionali</td></tr>
-                <tr><td>Data Evento</td><td>Precompilata, modificabile solo in date future</td></tr>
-                <tr><td>Ora Inizio</td><td>Orario di inizio (formato HH:MM)</td></tr>
-                <tr><td>Durata</td><td>Durata in minuti (default 120)</td></tr>
-            </table>
+            <h4>Configura la griglia (solo se "Layout personalizzato")</h4>
+            <p>Se non hai scelto un layout esistente, compaiono i campi Numero File, Numero Colonne e Corridoi, esattamente come prima. Puoi anche <strong>salvare questa configurazione come nuovo layout riutilizzabile</strong> compilando il campo "Salva questa griglia come nuovo layout" con un nome — verrà creato automaticamente e disponibile da lì in poi in Gestione Layout Posti.</p>
         </div>
     </div>
     <div class="step">
         <div class="step-num">4</div>
         <div class="step-content">
-            <h4>Verifica la capacita'</h4>
-            <p>L'applicazione calcola automaticamente i posti totali (file x colonne).</p>
+            <h4>Verifica la capacità e l'overbooking</h4>
+            <p>L'applicazione calcola automaticamente i posti totali (file × colonne) e mostra se superano la capienza della sala.</p>
             <div class="alert alert-warning">
-                Se i posti creati superano la capacita' della sala, l'evento non verra' creato.
+                Se i posti superano la capienza normale, puoi spuntare <strong>"Abilita overbooking per questo evento"</strong> — funziona solo se la sala ha un tetto di overbooking configurato (vedi <a href="#faq-overbooking">4.1</a>); altrimenti l'evento non verrà creato.
             </div>
         </div>
     </div>
     <div class="step">
         <div class="step-num">5</div>
         <div class="step-content">
-            <h4>Conferma creazione</h4>
-            <p>Clicca <strong>Crea Evento</strong>. I posti verranno generati automaticamente con file A, B, C... e colonne numerate.</p>
+            <h4>Completa i restanti campi e conferma</h4>
+            <p>Nome Evento, Descrizione (opzionale), Data (precompilata se arrivi dal calendario), Ora Inizio, Durata. Clicca <strong>Crea Evento</strong> — i posti verranno generati automaticamente con file A, B, C... e colonne numerate.</p>
         </div>
     </div>
     <div class="screenshot">[Screenshot: Modulo creazione evento]</div>
-    <div class="alert alert-info">
-        <strong>Suggerimento:</strong> se hai già configurato dei <a href="#admin-layout-posti">Layout Posti</a> per questa sala (sezione 3.7), puoi copiarne i valori (file, colonne, corridoi) qui nel modulo invece di ricalcolarli da zero. L'integrazione diretta "scegli layout dal menu" nel modulo di creazione evento è prevista in un prossimo aggiornamento.
-    </div>
 </div>
 
 <div class="section" id="admin-prenotazioni">
@@ -1345,6 +1337,15 @@ source venv/bin/activate    (Linux/Mac)</pre>
 <div class="section" id="changelog">
     <h2>📝 6. Changelog</h2>
 
+    <h3>v1.6 (2026)</h3>
+    <ul>
+        <li><strong>Nuovo:</strong> Integrazione Layout Posti nel modulo di Creazione Evento — scegli un layout salvato dal menu (precompila file/colonne/corridoi automaticamente) oppure resta su "Layout personalizzato" per inserirli a mano</li>
+        <li><strong>Nuovo:</strong> Possibilità di "Salvare la griglia come nuovo layout" direttamente durante la creazione di un evento, senza dover prima passare da Gestione Layout Posti</li>
+        <li><strong>Nuovo:</strong> Checkbox "Abilita overbooking" disponibile anche in Creazione Evento (oltre che in Layout Posti)</li>
+        <li><strong>Nuovo:</strong> Campo "Genere Evento" opzionale in Creazione Evento</li>
+        <li><strong>Update:</strong> Navbar dinamica — il tasto principale mostra "📅 Calendario" ovunque, e diventa "+ Crea Evento" solo quando sei già sulla pagina Calendario (solo admin)</li>
+    </ul>
+
     <h3>v1.5 (2026)</h3>
     <ul>
         <li><strong>Nuovo:</strong> Gestione Sale via interfaccia web (creazione, modifica, eliminazione) — prima richiedeva accesso diretto al database</li>
@@ -1402,7 +1403,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
 {% endif %}
 
 <footer>
-    <p>📘 Guida EventBooking v1.5</p>
+    <p>📘 Guida EventBooking v1.6</p>
     <p>Per supporto, aggiornamenti o segnalazione bug, contatta l'amministratore di sistema.</p>
     <p style="margin-top:10px;"><a href="#" onclick="openCredits(); return false;" style="color:var(--accent);">Credits</a></p>
 </footer>
@@ -1428,7 +1429,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
             <small>(Anthropic)</small>
         </p>
         <p style="margin-top:20px; color:#666; font-size:0.9em;">
-            Versione 1.5 · 2026
+            Versione 1.6 · 2026
         </p>
     </div>
 </div>
