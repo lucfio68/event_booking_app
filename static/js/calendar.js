@@ -137,6 +137,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     btnBook.disabled = !hasEvents;
                 }
 
+                const navCreaEvento = document.getElementById('navCreaEvento');
+                if (navCreaEvento) {
+                    const baseHref = navCreaEvento.href.split('?')[0];
+                    navCreaEvento.href = baseHref + '?date=' + selectedDate;
+                }
+
                 renderDays(); // aggiorna selezione visiva
             });
 

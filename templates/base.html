@@ -23,7 +23,7 @@
             {% if current_user.is_authenticated %}
                 <span class="nav-user">Ciao, {{ current_user.nome_cognome }} ({{ current_user.tipo }})</span>
                 {% if current_user.is_admin() and request.endpoint == 'calendar_view' %}
-                    <a href="{{ url_for('create_event') }}" class="btn btn-primary">+ Crea Evento</a>
+                    <a href="{{ url_for('create_event') }}" id="navCreaEvento" class="btn btn-primary">+ Crea Evento</a>
                 {% else %}
                     <a href="{{ url_for('calendar_view') }}" class="btn btn-primary">📅 Calendario</a>
                 {% endif %}
