@@ -755,6 +755,267 @@ def create_event():
         today=real_today, selected_date=selected_date
     )
 
+
+# ==================== MODIFICA LAYOUT EVENTO ESISTENTE (Fase A - rifinitura) ====================
+#
+# Scope deliberatamente ristretto per sicurezza:
+#   - Aggiunta file/colonne: sempre libera, fino al limite sala (+ overbooking se abilitato)
+#   - Rimozione: SOLO dell'ultima fila o dell'ultima colonna (mai una posizione intermedia),
+#     e solo se completamente libera. Questo evita di dover rinumerare file/colonne successive
+#     e di dover decidere come "spezzare" i corridoi già configurati.
+#   - Corridoi: mai ricalcolati automaticamente, l'admin li modifica sempre manualmente.
+
+def _ultima_fila_libera(evento):
+    ultima_fila = chr(64 + evento.file)
+    occupati = Posto.query.filter(
+        Posto.evento_id == evento.id,
+        Posto.fila == ultima_fila,
+        Posto.stato != 'libero'
+    ).count()
+    return occupati == 0
+
+
+def _ultima_colonna_libera(evento):
+    occupati = Posto.query.filter(
+        Posto.evento_id == evento.id,
+        Posto.colonna == evento.colonne,
+        Posto.stato != 'libero'
+    ).count()
+    return occupati == 0
+
+
+@app.route('/admin/event/<int:event_id>/layout')
+@login_required
+def admin_evento_layout(event_id):
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+    sala = evento.sala
+
+    return render_template(
+        'admin_evento_layout.html',
+        evento=evento, sala=sala,
+        ultima_fila_libera=_ultima_fila_libera(evento) if evento.file > 1 else False,
+        ultima_colonna_libera=_ultima_colonna_libera(evento) if evento.colonne > 1 else False
+    )
+
+
+@app.route('/admin/event/<int:event_id>/layout/aggiungi-file', methods=['POST'])
+@login_required
+def admin_evento_aggiungi_file(event_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+    sala = evento.sala
+
+    n = request.form.get('numero', type=int) or 1
+    if n < 1:
+        flash('Numero di file da aggiungere non valido.', 'danger')
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    overbooking_abilitato = request.form.get('overbooking_abilitato') == 'on'
+    nuovo_file = evento.file + n
+    nuovo_posti_max = nuovo_file * evento.colonne
+    limite = sala.posti_max + (sala.overbooking_max if overbooking_abilitato else 0)
+
+    if nuovo_posti_max > limite:
+        flash(
+            f"Aggiungendo {n} file arriveresti a {nuovo_posti_max} posti, oltre il limite consentito "
+            f"({limite}{' con overbooking' if overbooking_abilitato else ''}).", 'danger'
+        )
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    if nuovo_file > 26:
+        flash('Non è possibile superare 26 file (lettere A-Z).', 'danger')
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    ultimo_numero = db.session.query(func.max(Posto.numero_posto)).filter_by(evento_id=event_id).scalar() or 0
+    nuovi_posti = []
+    for f in range(evento.file + 1, nuovo_file + 1):
+        fila_lettera = chr(64 + f)
+        for c in range(1, evento.colonne + 1):
+            ultimo_numero += 1
+            nuovi_posti.append(Posto(
+                sala_id=evento.sala_id, evento_id=event_id, numero_posto=ultimo_numero,
+                fila=fila_lettera, colonna=c, stato='libero'
+            ))
+
+    evento.file = nuovo_file
+    evento.posti_max = nuovo_posti_max
+    if overbooking_abilitato:
+        evento.overbooking_abilitato = True
+
+    db.session.add_all(nuovi_posti)
+    db.session.commit()
+    flash(f"Aggiunte {n} file ({len(nuovi_posti)} nuovi posti).", 'success')
+    return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+
+@app.route('/admin/event/<int:event_id>/layout/aggiungi-colonne', methods=['POST'])
+@login_required
+def admin_evento_aggiungi_colonne(event_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+    sala = evento.sala
+
+    n = request.form.get('numero', type=int) or 1
+    if n < 1:
+        flash('Numero di colonne da aggiungere non valido.', 'danger')
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    overbooking_abilitato = request.form.get('overbooking_abilitato') == 'on'
+    nuove_colonne = evento.colonne + n
+    nuovo_posti_max = evento.file * nuove_colonne
+    limite = sala.posti_max + (sala.overbooking_max if overbooking_abilitato else 0)
+
+    if nuovo_posti_max > limite:
+        flash(
+            f"Aggiungendo {n} colonne arriveresti a {nuovo_posti_max} posti, oltre il limite consentito "
+            f"({limite}{' con overbooking' if overbooking_abilitato else ''}).", 'danger'
+        )
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    ultimo_numero = db.session.query(func.max(Posto.numero_posto)).filter_by(evento_id=event_id).scalar() or 0
+    nuovi_posti = []
+    for f in range(1, evento.file + 1):
+        fila_lettera = chr(64 + f)
+        for c in range(evento.colonne + 1, nuove_colonne + 1):
+            ultimo_numero += 1
+            nuovi_posti.append(Posto(
+                sala_id=evento.sala_id, evento_id=event_id, numero_posto=ultimo_numero,
+                fila=fila_lettera, colonna=c, stato='libero'
+            ))
+
+    evento.colonne = nuove_colonne
+    evento.posti_max = nuovo_posti_max
+    if overbooking_abilitato:
+        evento.overbooking_abilitato = True
+
+    db.session.add_all(nuovi_posti)
+    db.session.commit()
+    flash(f"Aggiunte {n} colonne ({len(nuovi_posti)} nuovi posti).", 'success')
+    return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+
+@app.route('/admin/event/<int:event_id>/layout/rimuovi-file', methods=['POST'])
+@login_required
+def admin_evento_rimuovi_file(event_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+
+    if evento.file <= 1:
+        flash("Non puoi rimuovere l'unica fila rimasta.", 'danger')
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    ultima_fila = chr(64 + evento.file)
+
+    try:
+        # Lock delle righe coinvolte per evitare che una prenotazione arrivi
+        # proprio mentre stiamo verificando/eliminando (race condition).
+        posti_ultima_fila = Posto.query.filter(
+            Posto.evento_id == event_id,
+            Posto.fila == ultima_fila
+        ).with_for_update().all()
+
+        occupati = [p for p in posti_ultima_fila if p.stato != 'libero']
+        if occupati:
+            db.session.rollback()
+            flash(
+                f"Impossibile rimuovere l'ultima fila ({ultima_fila}): {len(occupati)} posti non sono liberi. "
+                f"Libera o sposta prima quelle prenotazioni.", 'danger'
+            )
+            return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+        for p in posti_ultima_fila:
+            db.session.delete(p)
+
+        evento.file -= 1
+        evento.posti_max = evento.file * evento.colonne
+        db.session.commit()
+        flash(f"Fila {ultima_fila} rimossa ({len(posti_ultima_fila)} posti eliminati).", 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Errore durante la rimozione: {str(e)}", 'danger')
+
+    return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+
+@app.route('/admin/event/<int:event_id>/layout/rimuovi-colonna', methods=['POST'])
+@login_required
+def admin_evento_rimuovi_colonna(event_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+
+    if evento.colonne <= 1:
+        flash("Non puoi rimuovere l'unica colonna rimasta.", 'danger')
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    ultima_colonna = evento.colonne
+
+    try:
+        posti_ultima_colonna = Posto.query.filter(
+            Posto.evento_id == event_id,
+            Posto.colonna == ultima_colonna
+        ).with_for_update().all()
+
+        occupati = [p for p in posti_ultima_colonna if p.stato != 'libero']
+        if occupati:
+            db.session.rollback()
+            flash(
+                f"Impossibile rimuovere l'ultima colonna ({ultima_colonna}): {len(occupati)} posti non sono liberi. "
+                f"Libera o sposta prima quelle prenotazioni.", 'danger'
+            )
+            return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+        for p in posti_ultima_colonna:
+            db.session.delete(p)
+
+        evento.colonne -= 1
+        evento.posti_max = evento.file * evento.colonne
+        db.session.commit()
+        flash(f"Colonna {ultima_colonna} rimossa ({len(posti_ultima_colonna)} posti eliminati).", 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Errore durante la rimozione: {str(e)}", 'danger')
+
+    return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+
+@app.route('/admin/event/<int:event_id>/layout/corridoi', methods=['POST'])
+@login_required
+def admin_evento_corridoi(event_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+
+    evento.corridoio_colonne = request.form.get('corridoio_colonne', '').strip()
+    evento.corridoio_file = request.form.get('corridoio_file', '').strip()
+    db.session.commit()
+    flash('Corridoi aggiornati.', 'success')
+    return redirect(url_for('admin_evento_layout', event_id=event_id))
+
 # ==================== ELIMINA EVENTO (ADMIN) ====================
 
 @app.route('/api/event/delete/<int:event_id>', methods=['POST'])

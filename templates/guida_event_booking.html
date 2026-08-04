@@ -291,7 +291,7 @@
 <header>
     <h1>📖 Guida EventBooking</h1>
     <p>Manuale completo per utenti e amministratori</p>
-    <span class="version-badge">v1.6</span>
+    <span class="version-badge">v1.7</span>
     {% if current_user.is_authenticated and not current_user.is_admin() %}
     <p style="margin-top:8px; font-size:0.85em; opacity:0.8;">Stai visualizzando la guida in versione <strong>Utente</strong>. Le sezioni riservate agli amministratori sono nascoste.</p>
     {% endif %}
@@ -320,11 +320,12 @@
         <li><a href="#admin-generi">3.6 Generi Evento</a></li>
         <li><a href="#admin-layout-posti">3.7 Layout Posti</a></li>
         <li><a href="#admin-eventi">3.8 Creazione Eventi</a></li>
-        <li><a href="#admin-prenotazioni">3.9 Gestione Prenotazioni</a></li>
-        <li><a href="#admin-ricerca">3.10 Ricerca e Filtri</a></li>
-        <li><a href="#admin-abbonato">3.11 Posti Abbonato</a></li>
-        <li><a href="#admin-riserva">3.12 Riservare Posti</a></li>
-        <li><a href="#admin-cancella">3.13 Cancellare Prenotazioni</a></li>
+        <li><a href="#admin-modifica-layout">3.9 Modifica Layout Evento</a></li>
+        <li><a href="#admin-prenotazioni">3.10 Gestione Prenotazioni</a></li>
+        <li><a href="#admin-ricerca">3.11 Ricerca e Filtri</a></li>
+        <li><a href="#admin-abbonato">3.12 Posti Abbonato</a></li>
+        <li><a href="#admin-riserva">3.13 Riservare Posti</a></li>
+        <li><a href="#admin-cancella">3.14 Cancellare Prenotazioni</a></li>
         <li><a href="#schema">4. Schema Database</a></li>
         <li><a href="#faq-overbooking">4.1 Overbooking — come funziona</a></li>
         {% endif %}
@@ -908,8 +909,25 @@ source venv/bin/activate    (Linux/Mac)</pre>
     <div class="screenshot">[Screenshot: Modulo creazione evento]</div>
 </div>
 
+<div class="section" id="admin-modifica-layout">
+    <h2><span class="badge badge-admin">Admin</span> 3.9 Modifica Layout Evento</h2>
+    <p>Una volta creato un evento, puoi comunque adattarne la griglia posti dalla pagina "Gestisci" → bottone <strong>🔧 Modifica Layout</strong>.</p>
+
+    <h3>Aggiungere file o colonne</h3>
+    <p>Sempre possibile, in qualsiasi momento: indica quante file o colonne aggiungere, spunta "Abilita overbooking" se serve superare la capienza normale della sala. I nuovi posti vengono creati come liberi.</p>
+
+    <h3>Rimuovere file o colonne</h3>
+    <div class="alert alert-warning">
+        <strong>Attenzione:</strong> è possibile rimuovere <strong>solo l'ultima fila o l'ultima colonna</strong> della griglia (non una posizione intermedia), e solo se è <strong>completamente libera</strong> — nessun posto prenotato, riservato o abbonato al suo interno. Se serve rimuovere posti in mezzo alla griglia, libera prima manualmente le prenotazioni coinvolte (spostandole o cancellandole) — l'app non lo fa mai in automatico, per non rischiare di alterare prenotazioni esistenti senza controllo.
+    </div>
+    <p>La pagina ti mostra già se l'ultima fila/colonna è libera o no, con un pulsante di rimozione abilitato solo quando è sicuro procedere.</p>
+
+    <h3>Corridoi</h3>
+    <p>I corridoi (tra colonne e tra file) si modificano sempre <strong>manualmente</strong> da questa stessa pagina — non vengono mai ricalcolati automaticamente quando aggiungi o rimuovi file/colonne. Se un corridoio finisce fuori dalla nuova griglia, semplicemente non viene più disegnato, senza effetti collaterali.</p>
+</div>
+
 <div class="section" id="admin-prenotazioni">
-    <h2><span class="badge badge-admin">Admin</span> 3.9 Gestione Prenotazioni</h2>
+    <h2><span class="badge badge-admin">Admin</span> 3.10 Gestione Prenotazioni</h2>
     <p>Gli amministratori possono visualizzare lo stato di tutti i posti e accedere ai dettagli.</p>
     <h3>Visualizzare i posti prenotati</h3>
     <div class="step">
@@ -981,7 +999,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
 </div>
 
 <div class="section" id="admin-ricerca">
-    <h2><span class="badge badge-admin">Admin</span> 3.10 Ricerca e Filtri</h2>
+    <h2><span class="badge badge-admin">Admin</span> 3.11 Ricerca e Filtri</h2>
     <p>Nella pagina di gestione evento, gli admin possono cercare le prenotazioni.</p>
     <h3>Come funziona la ricerca</h3>
     <div class="step">
@@ -1009,7 +1027,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
 </div>
 
 <div class="section" id="admin-abbonato">
-    <h2><span class="badge badge-admin">Admin</span> 3.11 Posti Abbonato</h2>
+    <h2><span class="badge badge-admin">Admin</span> 3.12 Posti Abbonato</h2>
     <p>I posti <strong>Abbonato</strong> sono una tipologia speciale di posto riservato, gestibile esclusivamente dagli amministratori. Funzionano in modo simile ai posti "Riservati" ma con un colore distintivo (viola) per identificarli facilmente nella mappa della sala.</p>
 
     <h3>Caratteristiche</h3>
@@ -1059,7 +1077,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
 </div>
 
 <div class="section" id="admin-riserva">
-    <h2><span class="badge badge-admin">Admin</span> 3.12 Riservare Posti</h2>
+    <h2><span class="badge badge-admin">Admin</span> 3.13 Riservare Posti</h2>
     <p>I posti <strong>Riservati</strong> permettono di bloccare temporaneamente uno o più posti senza associarli a una prenotazione utente vera e propria (es. per staff, ospiti, posti tecnici).</p>
 
     <h3>Procedura per riservare posti</h3>
@@ -1097,7 +1115,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
 </div>
 
 <div class="section" id="admin-cancella">
-    <h2><span class="badge badge-admin">Admin</span> 3.13 Cancellare Prenotazioni</h2>
+    <h2><span class="badge badge-admin">Admin</span> 3.14 Cancellare Prenotazioni</h2>
     <p>Gli amministratori possono cancellare posti prenotati, riservati o abbonati direttamente dalla mappa della sala.</p>
 
     <h3>Procedura di cancellazione</h3>
@@ -1337,6 +1355,12 @@ source venv/bin/activate    (Linux/Mac)</pre>
 <div class="section" id="changelog">
     <h2>📝 6. Changelog</h2>
 
+    <h3>v1.7 (2026)</h3>
+    <ul>
+        <li><strong>Nuovo:</strong> Modifica Layout su eventi già creati (pagina "Gestisci" → 🔧 Modifica Layout) — aggiunta libera di file/colonne (anche con overbooking), rimozione solo dell'ultima fila/colonna se completamente libera, corridoi sempre gestiti manualmente</li>
+        <li><strong>Nota:</strong> con questo rilascio si chiude la Fase A (Gestione Layout Posti) della roadmap</li>
+    </ul>
+
     <h3>v1.6 (2026)</h3>
     <ul>
         <li><strong>Nuovo:</strong> Integrazione Layout Posti nel modulo di Creazione Evento — scegli un layout salvato dal menu (precompila file/colonne/corridoi automaticamente) oppure resta su "Layout personalizzato" per inserirli a mano</li>
@@ -1403,7 +1427,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
 {% endif %}
 
 <footer>
-    <p>📘 Guida EventBooking v1.6</p>
+    <p>📘 Guida EventBooking v1.7</p>
     <p>Per supporto, aggiornamenti o segnalazione bug, contatta l'amministratore di sistema.</p>
     <p style="margin-top:10px;"><a href="#" onclick="openCredits(); return false;" style="color:var(--accent);">Credits</a></p>
 </footer>
@@ -1429,7 +1453,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
             <small>(Anthropic)</small>
         </p>
         <p style="margin-top:20px; color:#666; font-size:0.9em;">
-            Versione 1.6 · 2026
+            Versione 1.7 · 2026
         </p>
     </div>
 </div>

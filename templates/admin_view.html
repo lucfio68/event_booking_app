@@ -7,9 +7,12 @@
             <h2>Gestione Evento: {{ evento.nome }}</h2>
             <p><strong>Data:</strong> {{ evento.data_evento.strftime('%d/%m/%Y') }} | <strong>Sala:</strong> {{ evento.sala.nome }}</p>
         </div>
-        <button id="btnDeleteEvent" data-event-id="{{ evento.id }}" data-event-name="{{ evento.nome }}" class="btn btn-danger" style="background:#dc2626;">
-            🗑️ Elimina Evento
-        </button>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <a href="{{ url_for('admin_evento_layout', event_id=evento.id) }}" class="btn btn-secondary">🔧 Modifica Layout</a>
+            <button id="btnDeleteEvent" data-event-id="{{ evento.id }}" data-event-name="{{ evento.nome }}" class="btn btn-danger" style="background:#dc2626;">
+                🗑️ Elimina Evento
+            </button>
+        </div>
     </div>
 
     <div class="search-box">

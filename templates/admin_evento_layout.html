@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Modifica Layout - {{ evento.nome }}{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <h2>🔧 Modifica Layout — {{ evento.nome }}</h2>
+    <p class="text-muted">
+        Sala: {{ sala.nome }} (capienza {{ sala.posti_max }}{% if sala.overbooking_max %} + fino a {{ sala.overbooking_max }} overbooking{% endif %}) —
+        Griglia attuale: {{ evento.file }} file × {{ evento.colonne }} colonne ({{ evento.posti_max }} posti totali)
+    </p>
+
+    <div class="alert alert-info">
+        <strong>Nota:</strong> puoi sempre <em>aggiungere</em> file o colonne. La <em>rimozione</em> è possibile solo per l'ultima fila o l'ultima colonna, e solo se completamente libera (nessuna prenotazione/riserva) — se serve rimuovere una fila/colonna in mezzo alla griglia, libera prima tutti i posti coinvolti spostando o cancellando le prenotazioni manualmente.
+    </div>
+
+    <div class="form-row">
+        <div class="form-card" style="flex:1;">
+            <h3>➕ Aggiungi File</h3>
+            <form method="POST" action="{{ url_for('admin_evento_aggiungi_file', event_id=evento.id) }}">
+                <div class="form-group">
+                    <label>Numero di file da aggiungere</label>
+                    <input type="number" name="numero" min="1" value="1" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label style="display:flex; align-items:center; gap:8px; font-weight:600;">
+                        <input type="checkbox" name="overbooking_abilitato" style="width:auto;" {% if evento.overbooking_abilitato %}checked{% endif %}>
+                        Abilita overbooking se necessario
+                    </label>
+                </div>
+                <button type="submit" class="btn btn-primary">Aggiungi File</button>
+            </form>
+        </div>
+
+        <div class="form-card" style="flex:1;">
+            <h3>➕ Aggiungi Colonne</h3>
+            <form method="POST" action="{{ url_for('admin_evento_aggiungi_colonne', event_id=evento.id) }}">
+                <div class="form-group">
+                    <label>Numero di colonne da aggiungere</label>
+                    <input type="number" name="numero" min="1" value="1" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label style="display:flex; align-items:center; gap:8px; font-weight:600;">
+                        <input type="checkbox" name="overbooking_abilitato" style="width:auto;" {% if evento.overbooking_abilitato %}checked{% endif %}>
+                        Abilita overbooking se necessario
+                    </label>
+                </div>
+                <button type="submit" class="btn btn-primary">Aggiungi Colonne</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="form-row">
+        <div class="form-card" style="flex:1;">
+            <h3>➖ Rimuovi Ultima Fila ({{ evento.file }}ª = "{{ 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[evento.file-1] if evento.file <= 26 else '?' }}")</h3>
+            {% if evento.file <= 1 %}
+                <p class="text-muted">Non puoi rimuovere l'unica fila rimasta.</p>
+            {% elif ultima_fila_libera %}
+                <p>Tutti i posti dell'ultima fila sono liberi: puoi rimuoverla.</p>
+                <form method="POST" action="{{ url_for('admin_evento_rimuovi_file', event_id=evento.id) }}" onsubmit="return confirm('Rimuovere l\'ultima fila? Operazione irreversibile.');">
+                    <button type="submit" class="btn btn-danger">Rimuovi Ultima Fila</button>
+                </form>
+            {% else %}
+                <div class="alert alert-warning">
+                    L'ultima fila ha posti non liberi (prenotati/riservati). Libera prima quei posti per poterla rimuovere.
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="form-card" style="flex:1;">
+            <h3>➖ Rimuovi Ultima Colonna ({{ evento.colonne }}ª)</h3>
+            {% if evento.colonne <= 1 %}
+                <p class="text-muted">Non puoi rimuovere l'unica colonna rimasta.</p>
+            {% elif ultima_colonna_libera %}
+                <p>Tutti i posti dell'ultima colonna sono liberi: puoi rimuoverla.</p>
+                <form method="POST" action="{{ url_for('admin_evento_rimuovi_colonna', event_id=evento.id) }}" onsubmit="return confirm('Rimuovere l\'ultima colonna? Operazione irreversibile.');">
+                    <button type="submit" class="btn btn-danger">Rimuovi Ultima Colonna</button>
+                </form>
+            {% else %}
+                <div class="alert alert-warning">
+                    L'ultima colonna ha posti non liberi (prenotati/riservati). Libera prima quei posti per poterla rimuovere.
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="form-card">
+        <h3>🬂 Corridoi</h3>
+        <p class="text-muted">Modifica manuale — non vengono mai ricalcolati automaticamente quando aggiungi o rimuovi file/colonne.</p>
+        <form method="POST" action="{{ url_for('admin_evento_corridoi', event_id=evento.id) }}">
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Corridoi tra colonne <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(es. 3,6)</span></label>
+                    <input type="text" name="corridoio_colonne" value="{{ evento.corridoio_colonne or '' }}" class="form-control" pattern="[0-9,]*">
+                </div>
+                <div class="form-group col-6">
+                    <label>Corridoi tra file <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(es. 5)</span></label>
+                    <input type="text" name="corridoio_file" value="{{ evento.corridoio_file or '' }}" class="form-control" pattern="[0-9,]*">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-secondary">Aggiorna Corridoi</button>
+        </form>
+    </div>
+
+    <a href="{{ url_for('admin_event_view', event_id=evento.id) }}" class="btn btn-outline">Torna a Gestisci Evento</a>
+</div>
+{% endblock %}
