@@ -1,0 +1,25 @@
+========================================================
+BUG:
+il +Crea evento lanciato dal calendario non prende la data verifica e dimmi il motivo
+
+FIX:
+Il motivo per cui il pulsante "+ Crea evento" non prende la data selezionata dal calendario è dovuto a due fattori
+concorrenti tra backend (Flask) e frontend (HTML/JS):
+
+ 1 Mancanza dell'attributo value nell'HTML: Nel file templates/event_create.html, l'input della data (<input
+   type="date" id="dataEvento">) non ha l'attributo value valorizzato direttamente tramite Jinja2. Si affidava
+   esclusivamente a uno script JavaScript che cercava di leggere il parametro ?date= dall'URL.
+ 2 Confusione tra data minima e data selezionata: Nel backend (app.py), la variabile today veniva sovrascritta con la
+   data selezionata (selected_date). Questo faceva sì che nel template la data minima selezionabile (min="{{ today }}")
+   venisse impostata alla data dell'evento stesso, ma senza precompilare il campo di testo.
+
+FIX:
+
+Modifichiamo sia app.py che templates/event_create.html per gestire separatamente:
+
+ • real_today: La data odierna reale, usata come limite minimo (min) per impedire la creazione di eventi nel passato.
+ • selected_date: La data effettivamente cliccata sul calendario (passata tramite query parameter ?date=), usata per
+   precompilare il campo (value).
+
+
+========================================================

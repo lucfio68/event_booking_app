@@ -748,9 +748,11 @@ def create_event():
     sale = Sala.query.order_by(Sala.nome).all()
     generi = GenereEvento.query.order_by(GenereEvento.nome).all()
     layouts = LayoutPosti.query.all()
+    real_today = date.today().strftime('%Y-%m-%d')
+    selected_date = request.args.get('date', '')
     return render_template(
         'event_create.html', sale=sale, generi=generi, layouts=layouts,
-        today=date.today().strftime('%Y-%m-%d')
+        today=real_today, selected_date=selected_date
     )
 
 # ==================== ELIMINA EVENTO (ADMIN) ====================
