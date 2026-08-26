@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Sale ↔ Calendari Google{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <h2>🏛️🗓️ Associazione Sale ↔ Calendari Google</h2>
+    <p class="text-muted">
+        Ogni sala può avere un unico calendario Google associato. Sarà il calendario di riferimento della sala
+        (usato in futuro per l'esportazione degli eventi). L'elenco qui sotto mostra tutti i calendari visibili
+        dall'account Google collegato — inclusi eventuali calendari di altri organizzatori, se condivisi con
+        quell'account.
+    </p>
+
+    {% if errore_calendari %}
+    <div class="alert alert-danger">{{ errore_calendari }}</div>
+    {% endif %}
+
+    {% if calendari is none %}
+    <div class="alert alert-warning">
+        Impossibile recuperare l'elenco dei calendari in questo momento.
+        <a href="{{ url_for('admin_google_status') }}">Verifica la connessione Google</a>.
+    </div>
+    {% elif not calendari %}
+    <div class="alert alert-info">Nessun calendario trovato sull'account Google collegato.</div>
+    {% endif %}
+
+    <div class="prenotazioni-list">
+        <h3>Sale ({{ sale|length }})</h3>
+        {% if sale %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Sala</th>
+                    <th>Calendario associato</th>
+                    <th>Cambia associazione</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in sale %}
+                {% set assoc = associazioni.get(s.id) %}
+                <tr>
+                    <td>{{ s.nome }}</td>
+                    <td>
+                        {% if assoc %}
+                            {{ assoc.nome_calendario }}
+                            {% if not assoc.attivo %}<span class="badge">disattivato</span>{% endif %}
+                            <br><span class="text-muted" style="font-size:0.8em;"><code>{{ assoc.google_calendar_id }}</code></span>
+                        {% else %}
+                            <span class="text-muted">Nessuno</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if calendari %}
+                        <form method="POST" action="{{ url_for('admin_google_sale_associa', sala_id=s.id) }}" style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                            <select name="google_calendar_id" class="form-control" style="width:auto;"
+                                    onchange="this.form.nome_calendario.value = this.options[this.selectedIndex].dataset.nome;">
+                                <option value="">-- seleziona calendario --</option>
+                                {% for cal in calendari %}
+                                <option value="{{ cal.id }}" data-nome="{{ cal.summary }}"
+                                    {% if assoc and assoc.google_calendar_id == cal.id %}selected{% endif %}>
+                                    {{ cal.summary }}{% if cal.primary %} (principale){% endif %}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <input type="hidden" name="nome_calendario" value="{{ assoc.nome_calendario if assoc else '' }}">
+                            <button type="submit" class="btn btn-sm btn-primary">Salva</button>
+                        </form>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if assoc %}
+                        <form method="POST" action="{{ url_for('admin_google_sale_rimuovi', sala_id=s.id) }}" onsubmit="return confirm('Rimuovere l\'associazione calendario per la sala &quot;{{ s.nome }}&quot;?');">
+                            <button type="submit" class="btn btn-sm btn-danger">Rimuovi</button>
+                        </form>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>Nessuna sala creata. <a href="{{ url_for('admin_sale') }}">Crea prima una sala</a>.</p>
+        {% endif %}
+    </div>
+
+    <a href="{{ url_for('admin_google_status') }}" class="btn btn-outline">Torna a Google Calendar</a>
+</div>
+{% endblock %}

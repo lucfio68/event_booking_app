@@ -141,3 +141,25 @@ class GoogleConnessione(db.Model):
     ultimo_utilizzo = db.Column(db.DateTime, nullable=True)
 
     utente = db.relationship('Utente', backref='google_connessioni')
+
+
+class CalendarioGoogle(db.Model):
+    """
+    Fase B - Step 2: associazione Sala <-> calendario Google.
+    Una sala ha un unico calendario proprio (sala_id univoco): è il calendario
+    su cui, in futuro, verranno esportati gli eventi creati nell'app (Step 4).
+    L'import (Step 3) invece potrà pescare da QUALSIASI calendario visibile
+    dall'account Google collegato (non solo da questo), scegliendo poi in quale
+    sala far atterrare i singoli eventi importati.
+    """
+    __tablename__ = 'calendario_google'
+    id = db.Column(db.Integer, primary_key=True)
+    sala_id = db.Column(db.Integer, db.ForeignKey('sala.id'), nullable=False, unique=True, index=True)
+    google_calendar_id = db.Column(db.String(255), nullable=False)
+    nome_calendario = db.Column(db.String(255), nullable=False)  # cache del 'summary' Google, per non richiamare l'API ogni volta
+    attivo = db.Column(db.Boolean, default=True, nullable=False)
+    creato_da = db.Column(db.Integer, db.ForeignKey('utente.id'), nullable=True)
+    data_associazione = db.Column(db.DateTime, default=datetime.utcnow)
+    data_modifica = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    sala = db.relationship('Sala', backref=db.backref('calendario_google', uselist=False, cascade='all, delete-orphan'))

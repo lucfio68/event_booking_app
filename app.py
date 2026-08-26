@@ -11,7 +11,7 @@ from flask_limiter.util import get_remote_address
 from sqlalchemy import func, or_, text, inspect
 from sqlalchemy.orm import joinedload
 from itsdangerous import URLSafeTimedSerializer
-from models import db, Utente, Sala, Evento, Prenotazione, Posto, GenereEvento, LayoutPosti, GoogleConnessione
+from models import db, Utente, Sala, Evento, Prenotazione, Posto, GenereEvento, LayoutPosti, GoogleConnessione, CalendarioGoogle
 from config import Config
 
 # Fase B - Google Calendar
@@ -2266,6 +2266,116 @@ def admin_google_disconnect():
         flash('Nessun account Google era collegato.', 'info')
 
     return redirect(url_for('admin_google_status'))
+
+
+# ==================== FASE B - STEP 2: ASSOCIAZIONE SALA <-> CALENDARIO ====================
+#
+# Scope di questo step: tabella + UI per associare a ciascuna sala il proprio
+# calendario Google (uno solo per sala). L'elenco dei calendari mostrati in UI
+# viene dallo stesso account già collegato nello Step 1 (calendarList()), che
+# può includere anche calendari di altri organizzatori se condivisi con
+# quell'account. Nessun import/export reale in questo step (arriva in Step 3/4).
+
+def _elenca_calendari_google():
+    """Ritorna (lista_calendari, errore). lista_calendari è None se non c'è
+    una connessione attiva o se la chiamata fallisce."""
+    connessione = _connessione_google_attiva()
+    if not connessione:
+        return None, None
+    try:
+        creds = _credenziali_google(connessione)
+        service = google_build('calendar', 'v3', credentials=creds)
+        risultato = service.calendarList().list(maxResults=250).execute()
+        connessione.ultimo_utilizzo = datetime.utcnow()
+        db.session.commit()
+        return risultato.get('items', []), None
+    except GoogleHttpError as e:
+        return None, f"Errore dall'API Google: {e}"
+    except Exception as e:
+        return None, f"Errore durante il recupero dei calendari: {e}"
+
+
+@app.route('/admin/google/sale')
+@login_required
+def admin_google_sale():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    if not _google_configurato():
+        flash('Google Calendar non è ancora configurato sul server.', 'warning')
+        return redirect(url_for('admin_google_status'))
+
+    connessione = _connessione_google_attiva()
+    if not connessione:
+        flash('Collega prima un account Google prima di associare i calendari alle sale.', 'warning')
+        return redirect(url_for('admin_google_status'))
+
+    calendari, errore_calendari = _elenca_calendari_google()
+
+    sale = Sala.query.order_by(Sala.nome).all()
+    associazioni = {a.sala_id: a for a in CalendarioGoogle.query.all()}
+
+    return render_template(
+        'admin_google_sale.html',
+        sale=sale, associazioni=associazioni,
+        calendari=calendari, errore_calendari=errore_calendari
+    )
+
+
+@app.route('/admin/google/sale/<int:sala_id>/associa', methods=['POST'])
+@login_required
+def admin_google_sale_associa(sala_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    sala = db.session.get(Sala, sala_id)
+    if not sala:
+        abort(404)
+
+    google_calendar_id = (request.form.get('google_calendar_id') or '').strip()
+    if not google_calendar_id:
+        flash('Seleziona un calendario da associare.', 'warning')
+        return redirect(url_for('admin_google_sale'))
+
+    # Il nome lo recuperiamo dall'elenco appena mostrato in pagina (passato come campo nascosto)
+    # per non dover richiamare l'API Google solo per il display name.
+    nome_calendario = (request.form.get('nome_calendario') or google_calendar_id).strip()
+
+    associazione = CalendarioGoogle.query.filter_by(sala_id=sala_id).first()
+    if associazione:
+        associazione.google_calendar_id = google_calendar_id
+        associazione.nome_calendario = nome_calendario
+        associazione.attivo = True
+    else:
+        associazione = CalendarioGoogle(
+            sala_id=sala_id,
+            google_calendar_id=google_calendar_id,
+            nome_calendario=nome_calendario,
+            creato_da=current_user.id,
+        )
+        db.session.add(associazione)
+
+    db.session.commit()
+    flash(f'Calendario "{nome_calendario}" associato alla sala "{sala.nome}".', 'success')
+    return redirect(url_for('admin_google_sale'))
+
+
+@app.route('/admin/google/sale/<int:sala_id>/rimuovi', methods=['POST'])
+@login_required
+def admin_google_sale_rimuovi(sala_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    associazione = CalendarioGoogle.query.filter_by(sala_id=sala_id).first()
+    if associazione:
+        db.session.delete(associazione)
+        db.session.commit()
+        flash('Associazione rimossa.', 'success')
+    else:
+        flash('Nessuna associazione da rimuovere per questa sala.', 'info')
+
+    return redirect(url_for('admin_google_sale'))
 
 
 if __name__ == '__main__':

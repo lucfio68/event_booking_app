@@ -20,6 +20,7 @@
 
         <div style="display:flex; gap:10px; margin-top:15px; flex-wrap:wrap;">
             <a href="{{ url_for('admin_google_status', test=1) }}" class="btn btn-primary">🔍 Testa connessione (elenca calendari)</a>
+            <a href="{{ url_for('admin_google_sale') }}" class="btn btn-secondary">🏛️ Sale ↔ Calendari</a>
             <form method="POST" action="{{ url_for('admin_google_disconnect') }}" onsubmit="return confirm('Scollegare l\'account Google? Andranno riconfigurate eventuali associazioni sala-calendario.');">
                 <button type="submit" class="btn btn-danger">Scollega</button>
             </form>
@@ -49,7 +50,7 @@
             </tbody>
         </table>
         <div class="alert alert-info">
-            L'associazione di questi calendari alle sale sarà disponibile nel prossimo step (Step 2).
+            Per associare questi calendari alle sale, vai alla pagina <a href="{{ url_for('admin_google_sale') }}">Sale ↔ Calendari</a>.
         </div>
         {% else %}
         <p>Nessun calendario trovato su questo account.</p>
