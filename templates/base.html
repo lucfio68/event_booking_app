@@ -31,6 +31,7 @@
                 {% if current_user.is_admin() %}
                     <a href="{{ url_for('admin_sale') }}" class="btn btn-secondary">🏛️ Sale</a>
                     <a href="{{ url_for('admin_layout_posti') }}" class="btn btn-secondary">🪑 Layout Posti</a>
+                    <a href="{{ url_for('admin_google_status') }}" class="btn btn-secondary">🗓️ Google Calendar</a>
                 {% endif %}
                 <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>
             {% else %}

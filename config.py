@@ -25,3 +25,11 @@ class Config:
     # Chiave segreta richiesta (oltre al login admin) per le route di manutenzione DB
     # (/init-db, /admin/migrate-layout-posti). Se non impostata, quelle route restano bloccate.
     MIGRATION_SECRET = os.environ.get('MIGRATION_SECRET') or ''
+
+    # === Google Calendar (Fase B) ===
+    GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID') or ''
+    GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET') or ''
+    GOOGLE_REDIRECT_URI = os.environ.get('GOOGLE_REDIRECT_URI') or ''
+    # Chiave Fernet (32 byte urlsafe-base64) per cifrare il refresh_token nel DB.
+    # Generarla una volta con: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    TOKEN_ENCRYPTION_KEY = os.environ.get('TOKEN_ENCRYPTION_KEY') or ''

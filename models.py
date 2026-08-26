@@ -123,3 +123,21 @@ class Posto(db.Model):
         db.Index('idx_posto_prenotazione', 'prenotazione_id'),
         db.Index('idx_posto_evento_fila_colonna', 'evento_id', 'fila', 'colonna'),
     )
+
+
+class GoogleConnessione(db.Model):
+    """
+    Fase B - Connessione OAuth a Google Calendar.
+    Pensata per un solo admin collegato alla volta (non multi-account):
+    la riga più recente rappresenta la connessione attiva.
+    """
+    __tablename__ = 'google_connessione'
+    id = db.Column(db.Integer, primary_key=True)
+    utente_id = db.Column(db.Integer, db.ForeignKey('utente.id'), nullable=False)
+    email_google = db.Column(db.String(255), nullable=False)  # account Google collegato, solo per mostrarlo in UI
+    refresh_token_cifrato = db.Column(db.Text, nullable=False)  # cifrato con Fernet (TOKEN_ENCRYPTION_KEY)
+    scopes = db.Column(db.Text, nullable=True)  # scope OAuth concessi, separati da spazio
+    data_connessione = db.Column(db.DateTime, default=datetime.utcnow)
+    ultimo_utilizzo = db.Column(db.DateTime, nullable=True)
+
+    utente = db.relationship('Utente', backref='google_connessioni')

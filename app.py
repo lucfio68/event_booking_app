@@ -3,7 +3,7 @@ import re
 import threading
 import socket
 from datetime import datetime, date, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, session
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_mail import Mail, Message
 from flask_limiter import Limiter
@@ -11,8 +11,16 @@ from flask_limiter.util import get_remote_address
 from sqlalchemy import func, or_, text, inspect
 from sqlalchemy.orm import joinedload
 from itsdangerous import URLSafeTimedSerializer
-from models import db, Utente, Sala, Evento, Prenotazione, Posto, GenereEvento, LayoutPosti
+from models import db, Utente, Sala, Evento, Prenotazione, Posto, GenereEvento, LayoutPosti, GoogleConnessione
 from config import Config
+
+# Fase B - Google Calendar
+import requests as http_requests
+from cryptography.fernet import Fernet, InvalidToken
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build as google_build
+from googleapiclient.errors import HttpError as GoogleHttpError
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -2048,6 +2056,217 @@ def migrate_layout_posti():
     except Exception as e:
         db.session.rollback()
         return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+# ==================== FASE B - GOOGLE CALENDAR: CONNESSIONE OAUTH ====================
+#
+# Scope di questo step: SOLO la connessione OAuth (collega/scollega l'account,
+# verifica che funzioni elencando i calendari disponibili). Nessuna associazione
+# sala<->calendario ancora (arriva nello Step 2), nessun import/export (Step 3/4).
+
+GOOGLE_SCOPES = [
+    'https://www.googleapis.com/auth/calendar.readonly',
+    'https://www.googleapis.com/auth/calendar.events',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'openid',
+]
+
+
+def _google_configurato():
+    return bool(app.config.get('GOOGLE_CLIENT_ID') and app.config.get('GOOGLE_CLIENT_SECRET')
+                and app.config.get('GOOGLE_REDIRECT_URI') and app.config.get('TOKEN_ENCRYPTION_KEY'))
+
+
+def _google_client_config():
+    return {
+        "web": {
+            "client_id": app.config['GOOGLE_CLIENT_ID'],
+            "client_secret": app.config['GOOGLE_CLIENT_SECRET'],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [app.config['GOOGLE_REDIRECT_URI']],
+        }
+    }
+
+
+def _fernet():
+    key = app.config.get('TOKEN_ENCRYPTION_KEY')
+    if not key:
+        raise RuntimeError("TOKEN_ENCRYPTION_KEY non configurata.")
+    return Fernet(key.encode() if isinstance(key, str) else key)
+
+
+def _cifra_token(token_plain):
+    return _fernet().encrypt(token_plain.encode()).decode()
+
+
+def _decifra_token(token_cifrato):
+    return _fernet().decrypt(token_cifrato.encode()).decode()
+
+
+def _connessione_google_attiva():
+    """Restituisce l'unica riga di connessione attiva (la più recente), o None."""
+    return GoogleConnessione.query.order_by(GoogleConnessione.data_connessione.desc()).first()
+
+
+def _credenziali_google(connessione):
+    """Costruisce un oggetto Credentials di google-auth a partire dalla connessione salvata,
+    decifrando il refresh_token. La libreria lo userà per ottenere un access_token fresco."""
+    refresh_token = _decifra_token(connessione.refresh_token_cifrato)
+    return Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=app.config['GOOGLE_CLIENT_ID'],
+        client_secret=app.config['GOOGLE_CLIENT_SECRET'],
+        scopes=GOOGLE_SCOPES,
+    )
+
+
+@app.route('/admin/google')
+@login_required
+def admin_google_status():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    if not _google_configurato():
+        flash(
+            "Google Calendar non è ancora configurato sul server: mancano una o più variabili "
+            "d'ambiente (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, TOKEN_ENCRYPTION_KEY).",
+            'warning'
+        )
+
+    connessione = _connessione_google_attiva()
+    calendari = None
+    errore_calendari = None
+
+    if connessione and request.args.get('test') == '1':
+        try:
+            creds = _credenziali_google(connessione)
+            service = google_build('calendar', 'v3', credentials=creds)
+            risultato = service.calendarList().list(maxResults=50).execute()
+            calendari = risultato.get('items', [])
+            connessione.ultimo_utilizzo = datetime.utcnow()
+            db.session.commit()
+        except GoogleHttpError as e:
+            errore_calendari = f"Errore dall'API Google: {e}"
+        except Exception as e:
+            errore_calendari = f"Errore durante il test: {e}"
+
+    return render_template(
+        'admin_google.html',
+        connessione=connessione, calendari=calendari, errore_calendari=errore_calendari,
+        google_configurato=_google_configurato()
+    )
+
+
+@app.route('/admin/google/connect')
+@login_required
+def admin_google_connect():
+    if not current_user.is_admin():
+        abort(403)
+    if not _google_configurato():
+        flash('Configurazione Google mancante sul server. Contatta chi gestisce il deploy.', 'danger')
+        return redirect(url_for('admin_google_status'))
+
+    flow = Flow.from_client_config(
+        _google_client_config(), scopes=GOOGLE_SCOPES,
+        redirect_uri=app.config['GOOGLE_REDIRECT_URI']
+    )
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',      # necessario per ottenere un refresh_token
+        prompt='consent',           # forza il consenso ogni volta, garantendo il refresh_token anche su ri-connessioni
+        include_granted_scopes='true'
+    )
+    session['google_oauth_state'] = state
+    return redirect(authorization_url)
+
+
+@app.route('/admin/google/callback')
+@login_required
+def admin_google_callback():
+    if not current_user.is_admin():
+        abort(403)
+
+    stato_atteso = session.pop('google_oauth_state', None)
+    stato_ricevuto = request.args.get('state')
+    if not stato_atteso or stato_atteso != stato_ricevuto:
+        flash('Sessione OAuth non valida o scaduta. Riprova la connessione.', 'danger')
+        return redirect(url_for('admin_google_status'))
+
+    if request.args.get('error'):
+        flash(f"Autorizzazione negata da Google: {request.args.get('error')}", 'warning')
+        return redirect(url_for('admin_google_status'))
+
+    try:
+        flow = Flow.from_client_config(
+            _google_client_config(), scopes=GOOGLE_SCOPES,
+            redirect_uri=app.config['GOOGLE_REDIRECT_URI']
+        )
+        flow.fetch_token(authorization_response=request.url)
+        creds = flow.credentials
+
+        if not creds.refresh_token:
+            flash(
+                "Google non ha restituito un refresh_token. Prova a scollegare l'account da "
+                "https://myaccount.google.com/permissions e ripetere la connessione.", 'danger'
+            )
+            return redirect(url_for('admin_google_status'))
+
+        # Recupera l'email dell'account collegato
+        userinfo = http_requests.get(
+            'https://www.googleapis.com/oauth2/v2/userinfo',
+            headers={'Authorization': f'Bearer {creds.token}'}, timeout=10
+        ).json()
+        email_google = userinfo.get('email', 'sconosciuta')
+
+        # Design a singola connessione attiva: rimuovo eventuali precedenti
+        GoogleConnessione.query.delete()
+
+        connessione = GoogleConnessione(
+            utente_id=current_user.id,
+            email_google=email_google,
+            refresh_token_cifrato=_cifra_token(creds.refresh_token),
+            scopes=' '.join(creds.scopes or GOOGLE_SCOPES),
+        )
+        db.session.add(connessione)
+        db.session.commit()
+        flash(f"Account Google collegato con successo: {email_google}", 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Errore durante il collegamento a Google: {str(e)}", 'danger')
+
+    return redirect(url_for('admin_google_status'))
+
+
+@app.route('/admin/google/disconnect', methods=['POST'])
+@login_required
+def admin_google_disconnect():
+    if not current_user.is_admin():
+        abort(403)
+
+    connessione = _connessione_google_attiva()
+    if connessione:
+        # Best-effort: prova a revocare il token lato Google (non blocca in caso di errore)
+        try:
+            refresh_token = _decifra_token(connessione.refresh_token_cifrato)
+            http_requests.post(
+                'https://oauth2.googleapis.com/revoke',
+                params={'token': refresh_token},
+                headers={'content-type': 'application/x-www-form-urlencoded'}, timeout=10
+            )
+        except Exception:
+            pass
+
+        db.session.delete(connessione)
+        db.session.commit()
+        flash('Account Google scollegato.', 'success')
+    else:
+        flash('Nessun account Google era collegato.', 'info')
+
+    return redirect(url_for('admin_google_status'))
+
 
 if __name__ == '__main__':
     app.run()

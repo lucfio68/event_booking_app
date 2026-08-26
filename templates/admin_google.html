@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Google Calendar{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <h2>🗓️ Connessione Google Calendar</h2>
+    <p class="text-muted">Collega un account Google per poter importare/esportare eventi dai calendari (funzionalità nei prossimi step).</p>
+
+    {% if not google_configurato %}
+    <div class="alert alert-warning">
+        La configurazione lato server non è completa (variabili d'ambiente Google mancanti). Questa pagina non può funzionare finché non vengono impostate.
+    </div>
+    {% endif %}
+
+    {% if connessione %}
+    <div class="form-card">
+        <h3>✅ Account collegato</h3>
+        <p><strong>Email:</strong> {{ connessione.email_google }}</p>
+        <p><strong>Collegato il:</strong> {{ connessione.data_connessione.strftime('%d/%m/%Y %H:%M') }}</p>
+        <p><strong>Ultimo utilizzo:</strong> {{ connessione.ultimo_utilizzo.strftime('%d/%m/%Y %H:%M') if connessione.ultimo_utilizzo else 'Mai testato' }}</p>
+
+        <div style="display:flex; gap:10px; margin-top:15px; flex-wrap:wrap;">
+            <a href="{{ url_for('admin_google_status', test=1) }}" class="btn btn-primary">🔍 Testa connessione (elenca calendari)</a>
+            <form method="POST" action="{{ url_for('admin_google_disconnect') }}" onsubmit="return confirm('Scollegare l\'account Google? Andranno riconfigurate eventuali associazioni sala-calendario.');">
+                <button type="submit" class="btn btn-danger">Scollega</button>
+            </form>
+        </div>
+    </div>
+
+    {% if errore_calendari %}
+    <div class="alert alert-danger">{{ errore_calendari }}</div>
+    {% endif %}
+
+    {% if calendari is not none %}
+    <div class="prenotazioni-list">
+        <h3>Calendari trovati ({{ calendari|length }})</h3>
+        {% if calendari %}
+        <table class="table">
+            <thead>
+                <tr><th>Nome</th><th>ID Calendario</th><th>Ruolo</th></tr>
+            </thead>
+            <tbody>
+                {% for cal in calendari %}
+                <tr>
+                    <td>{{ cal.summary }}{% if cal.primary %} <span class="badge">principale</span>{% endif %}</td>
+                    <td><code>{{ cal.id }}</code></td>
+                    <td>{{ cal.accessRole }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div class="alert alert-info">
+            L'associazione di questi calendari alle sale sarà disponibile nel prossimo step (Step 2).
+        </div>
+        {% else %}
+        <p>Nessun calendario trovato su questo account.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="form-card">
+        <h3>Nessun account collegato</h3>
+        <p class="text-muted">Collega un account Google per iniziare. Ti verrà mostrata la schermata di consenso di Google.</p>
+        <a href="{{ url_for('admin_google_connect') }}" class="btn btn-primary" {% if not google_configurato %}style="pointer-events:none; opacity:0.5;"{% endif %}>
+            🔗 Collega Account Google
+        </a>
+    </div>
+    {% endif %}
+
+    <a href="{{ url_for('calendar_view') }}" class="btn btn-outline">Torna al Calendario</a>
+</div>
+{% endblock %}
