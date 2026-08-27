@@ -592,7 +592,8 @@ def api_events():
 
     eventi = Evento.query.filter(
         Evento.data_evento >= start_date,
-        Evento.data_evento < end_date
+        Evento.data_evento < end_date,
+        Evento.cancellato_google == False
     ).all()
 
     result = {}
@@ -1069,6 +1070,9 @@ def booking_page(event_id):
         abort(404)
     if ev.data_evento < date.today():
         flash("Non e' possibile prenotare eventi passati.", 'danger')
+        return redirect(url_for('calendar_view'))
+    if ev.cancellato_google:
+        flash("Questo evento è stato annullato (rimosso dal calendario Google di origine) e non è più prenotabile.", 'danger')
         return redirect(url_for('calendar_view'))
     return render_template('booking.html', evento=ev)
 
@@ -2058,6 +2062,65 @@ def migrate_layout_posti():
         return f"❌ Errore durante la migrazione: {str(e)}", 500
 
 
+# ==================== MIGRAZIONE IMPORT GOOGLE (Fase B, Step 3) ====================
+# Aggiunge le colonne di tracciabilità import su 'evento' (tabella già esistente:
+# db.create_all() non le crea da sola). Stessa protezione di /admin/migrate-layout-posti.
+
+@app.route('/admin/migrate-google-import')
+@login_required
+def migrate_google_import():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    esiti, aggiunte = [], []
+
+    try:
+        inspector = inspect(db.engine)
+        evento_columns = [col['name'] for col in inspector.get_columns('evento')]
+
+        colonne_da_aggiungere = [
+            ('origine', "ALTER TABLE evento ADD COLUMN origine VARCHAR(20) NOT NULL DEFAULT 'app'"),
+            ('google_event_id', "ALTER TABLE evento ADD COLUMN google_event_id VARCHAR(255)"),
+            ('google_calendar_id_origine', "ALTER TABLE evento ADD COLUMN google_calendar_id_origine VARCHAR(255)"),
+            ('google_updated', "ALTER TABLE evento ADD COLUMN google_updated TIMESTAMP"),
+            ('cancellato_google', "ALTER TABLE evento ADD COLUMN cancellato_google BOOLEAN NOT NULL DEFAULT FALSE"),
+        ]
+
+        for nome_colonna, ddl in colonne_da_aggiungere:
+            if nome_colonna not in evento_columns:
+                db.session.execute(text(ddl))
+                aggiunte.append(f'evento.{nome_colonna}')
+            else:
+                esiti.append(f"evento.{nome_colonna} esiste già")
+
+        # Indice su google_event_id (usato per il matching negli import successivi)
+        indici_esistenti = [idx['name'] for idx in inspector.get_indexes('evento')]
+        if 'ix_evento_google_event_id' not in indici_esistenti:
+            db.session.execute(text(
+                "CREATE INDEX ix_evento_google_event_id ON evento (google_event_id)"
+            ))
+            aggiunte.append('indice ix_evento_google_event_id')
+        else:
+            esiti.append("indice ix_evento_google_event_id esiste già")
+
+        if aggiunte:
+            db.session.commit()
+            return (
+                "✅ Migrazione completata!<br>"
+                f"Aggiunto: {', '.join(aggiunte)}<br>"
+                f"{'<br>'.join(esiti)}"
+            )
+        else:
+            return "ℹ️ Nessuna migrazione necessaria, colonne/indice già presenti.<br>" + '<br>'.join(esiti)
+
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
 # ==================== FASE B - GOOGLE CALENDAR: CONNESSIONE OAUTH ====================
 #
 # Scope di questo step: SOLO la connessione OAuth (collega/scollega l'account,
@@ -2376,6 +2439,346 @@ def admin_google_sale_rimuovi(sala_id):
         flash('Nessuna associazione da rimuovere per questa sala.', 'info')
 
     return redirect(url_for('admin_google_sale'))
+
+
+# ==================== FASE B - STEP 3: IMPORT MANUALE CON ANTEPRIMA/DIFF ====================
+#
+# Scope: l'admin sceglie un calendario SORGENTE (tra tutti quelli visibili
+# dall'account Google collegato, non necessariamente quello associato alla
+# sala) e un range "oggi + N giorni". Per ogni evento Google trovato nel
+# periodo, l'app mostra un'anteprima con lo stato (nuovo/modificato/invariato)
+# e l'admin sceglie l'azione riga per riga PRIMA che qualsiasi modifica venga
+# applicata al database. Fuso orario di riferimento fisso: Europe/Rome.
+# Eventi "intera giornata" non sono supportati in questa versione (compaiono
+# in anteprima come non importabili). Le occorrenze di eventi ricorrenti nel
+# periodo vengono già espanse da Google stesso (singleEvents=True) e importate
+# come eventi singoli indipendenti, senza alcun legame con la ricorrenza.
+
+from zoneinfo import ZoneInfo
+
+FUSO_ORARIO_APP = ZoneInfo('Europe/Rome')
+
+
+def _parse_datetime_google(valore_iso):
+    """Converte una stringa dateTime RFC3339 di Google in un datetime timezone-aware."""
+    return datetime.fromisoformat(valore_iso.replace('Z', '+00:00'))
+
+
+def _layout_default_per_sala(sala_id):
+    """Trova il layout da usare per un evento importato: preferisce il default
+    'generico' (genere_evento_id NULL), altrimenti un default qualsiasi di
+    quella sala. Ritorna None se la sala non ha nessun layout di default."""
+    layout = LayoutPosti.query.filter_by(sala_id=sala_id, genere_evento_id=None, is_default=True).first()
+    if not layout:
+        layout = LayoutPosti.query.filter_by(sala_id=sala_id, is_default=True).first()
+    return layout
+
+
+def _crea_posti_griglia(evento):
+    numero = 1
+    posti_bulk = []
+    for f in range(1, evento.file + 1):
+        fila_lettera = chr(64 + f)
+        for c in range(1, evento.colonne + 1):
+            posti_bulk.append(Posto(
+                sala_id=evento.sala_id, evento_id=evento.id, numero_posto=numero,
+                fila=fila_lettera, colonna=c, stato='libero'
+            ))
+            numero += 1
+    db.session.add_all(posti_bulk)
+
+
+def _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, google_event_id):
+    """Crea un nuovo Evento prenotabile a partire da un evento Google importato,
+    usando il layout di default della sala scelta. Ritorna (evento, None) oppure
+    (None, messaggio_errore) se la sala non ha un layout di default idoneo."""
+    layout = _layout_default_per_sala(sala_id)
+    if not layout:
+        return None, 'nessun layout di default configurato per questa sala'
+
+    sala = db.session.get(Sala, sala_id)
+    posti_max = layout.file * layout.colonne
+    limite = sala.posti_max + (sala.overbooking_max if layout.overbooking_abilitato else 0)
+    if posti_max > limite:
+        return None, f'il layout di default ({posti_max} posti) supera la capacità della sala ({limite})'
+
+    evento = Evento(
+        nome=nome, descrizione=descrizione, data_evento=data_obj, ora_inizio=ora_obj,
+        durata=durata, posti_max=posti_max, file=layout.file, colonne=layout.colonne,
+        corridoio_colonne=layout.corridoio_colonne, corridoio_file=layout.corridoio_file,
+        sala_id=sala_id, creato_da=current_user.id,
+        layout_posti_id=layout.id, genere_evento_id=layout.genere_evento_id,
+        overbooking_abilitato=layout.overbooking_abilitato,
+        origine='google', google_event_id=google_event_id,
+        google_calendar_id_origine=calendar_id if google_event_id else None,
+        google_updated=datetime.utcnow(),
+    )
+    db.session.add(evento)
+    db.session.flush()
+    _crea_posti_griglia(evento)
+    return evento, None
+
+
+def _recupera_eventi_google_range(service, calendar_id, giorni):
+    """Eventi Google nel periodo [ora, ora+giorni]; singleEvents=True fa sì che
+    Google stesso espanda le occorrenze di eventi ricorrenti come voci singole."""
+    ora = datetime.now(FUSO_ORARIO_APP)
+    time_min = ora.isoformat()
+    time_max = (ora + timedelta(days=giorni)).isoformat()
+
+    eventi, page_token = [], None
+    while True:
+        risultato = service.events().list(
+            calendarId=calendar_id, timeMin=time_min, timeMax=time_max,
+            singleEvents=True, orderBy='startTime', maxResults=250, pageToken=page_token
+        ).execute()
+        eventi.extend(risultato.get('items', []))
+        page_token = risultato.get('nextPageToken')
+        if not page_token:
+            break
+    return eventi
+
+
+def _normalizza_evento_google(item):
+    """Estrae i campi rilevanti nel fuso Europe/Rome. Ritorna None se l'evento
+    è 'intera giornata' (nessun orario), non supportato in questa versione."""
+    start, end = item.get('start', {}), item.get('end', {})
+    if 'dateTime' not in start or 'dateTime' not in end:
+        return None
+
+    inizio = _parse_datetime_google(start['dateTime']).astimezone(FUSO_ORARIO_APP)
+    fine = _parse_datetime_google(end['dateTime']).astimezone(FUSO_ORARIO_APP)
+    durata_minuti = max(1, round((fine - inizio).total_seconds() / 60))
+
+    return {
+        'google_event_id': item['id'],
+        'nome': item.get('summary') or '(senza titolo)',
+        'descrizione': item.get('description', '') or '',
+        'data_evento': inizio.date(),
+        'ora_inizio': inizio.time().replace(second=0, microsecond=0),
+        'durata': durata_minuti,
+        'link_google': item.get('htmlLink'),
+    }
+
+
+@app.route('/admin/google/import', methods=['GET'])
+@login_required
+def admin_google_import():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    if not _google_configurato():
+        flash('Google Calendar non è ancora configurato sul server.', 'warning')
+        return redirect(url_for('admin_google_status'))
+
+    connessione = _connessione_google_attiva()
+    if not connessione:
+        flash('Collega prima un account Google.', 'warning')
+        return redirect(url_for('admin_google_status'))
+
+    calendari, errore_calendari = _elenca_calendari_google()
+
+    calendar_id = request.args.get('calendar_id', '').strip()
+    try:
+        giorni = int(request.args.get('giorni', 60))
+    except (TypeError, ValueError):
+        giorni = 60
+    giorni = max(1, min(giorni, 365))
+
+    sale = Sala.query.order_by(Sala.nome).all()
+    righe_nuovi, righe_modificati, righe_invariati = [], [], []
+    righe_non_importabili, righe_cancellati = [], []
+    errore_import = None
+
+    if calendar_id:
+        try:
+            creds = _credenziali_google(connessione)
+            service = google_build('calendar', 'v3', credentials=creds)
+            eventi_google = _recupera_eventi_google_range(service, calendar_id, giorni)
+            connessione.ultimo_utilizzo = datetime.utcnow()
+            db.session.commit()
+
+            associazione = CalendarioGoogle.query.filter_by(google_calendar_id=calendar_id, attivo=True).first()
+            sala_suggerita_id = associazione.sala_id if associazione else None
+
+            id_trovati = set()
+            for item in eventi_google:
+                if item.get('status') == 'cancelled':
+                    continue
+                dati = _normalizza_evento_google(item)
+                if dati is None:
+                    righe_non_importabili.append({
+                        'nome': item.get('summary') or '(senza titolo)',
+                        'motivo': 'Evento "intera giornata" (senza orario): non supportato in questa versione.',
+                        'link_google': item.get('htmlLink'),
+                    })
+                    continue
+
+                id_trovati.add(dati['google_event_id'])
+                matched = Evento.query.filter_by(
+                    google_event_id=dati['google_event_id'], google_calendar_id_origine=calendar_id
+                ).first()
+
+                riga = dict(dati)
+                if matched:
+                    differenze = []
+                    if matched.nome != dati['nome']:
+                        differenze.append(('Nome', matched.nome, dati['nome']))
+                    if matched.data_evento != dati['data_evento']:
+                        differenze.append(('Data', matched.data_evento.strftime('%d/%m/%Y'), dati['data_evento'].strftime('%d/%m/%Y')))
+                    if matched.ora_inizio != dati['ora_inizio']:
+                        differenze.append(('Ora', matched.ora_inizio.strftime('%H:%M'), dati['ora_inizio'].strftime('%H:%M')))
+                    if matched.durata != dati['durata']:
+                        differenze.append(('Durata (min)', matched.durata, dati['durata']))
+
+                    riga['evento_id'] = matched.id
+                    riga['sala_attuale'] = matched.sala.nome
+                    riga['sala_attuale_id'] = matched.sala_id
+                    riga['ha_prenotazioni'] = len(matched.prenotazioni) > 0
+
+                    (righe_modificati if differenze else righe_invariati).append(riga)
+                    riga['differenze'] = differenze
+                else:
+                    riga['sala_suggerita'] = sala_suggerita_id
+                    righe_nuovi.append(riga)
+
+            oggi = date.today()
+            fine_periodo = oggi + timedelta(days=giorni)
+            candidati_cancellati = Evento.query.filter(
+                Evento.google_calendar_id_origine == calendar_id,
+                Evento.origine == 'google',
+                Evento.cancellato_google == False,
+                Evento.data_evento >= oggi,
+                Evento.data_evento <= fine_periodo,
+            ).all()
+            for ev in candidati_cancellati:
+                if ev.google_event_id not in id_trovati:
+                    righe_cancellati.append({
+                        'evento_id': ev.id, 'nome': ev.nome, 'data_evento': ev.data_evento,
+                        'ora_inizio': ev.ora_inizio, 'sala': ev.sala.nome,
+                        'ha_prenotazioni': len(ev.prenotazioni) > 0,
+                    })
+
+        except GoogleHttpError as e:
+            errore_import = f"Errore dall'API Google: {e}"
+        except Exception as e:
+            errore_import = f"Errore durante il recupero degli eventi: {e}"
+
+    return render_template(
+        'admin_google_import.html',
+        calendari=calendari, errore_calendari=errore_calendari,
+        calendar_id=calendar_id, giorni=giorni, sale=sale,
+        righe_nuovi=righe_nuovi, righe_modificati=righe_modificati,
+        righe_invariati=righe_invariati, righe_non_importabili=righe_non_importabili,
+        righe_cancellati=righe_cancellati, errore_import=errore_import,
+    )
+
+
+@app.route('/admin/google/import/applica', methods=['POST'])
+@login_required
+def admin_google_import_applica():
+    if not current_user.is_admin():
+        abort(403)
+
+    calendar_id = request.form.get('calendar_id', '').strip()
+    giorni = request.form.get('giorni', type=int) or 60
+    gids = request.form.getlist('gid')
+
+    contatori = {'importati': 0, 'aggiornati': 0, 'sostituiti': 0, 'mantenuti_entrambi': 0, 'ignorati': 0, 'errori': 0}
+
+    for gid in gids:
+        azione = request.form.get(f'azione__{gid}', 'ignora')
+        if azione == 'ignora':
+            contatori['ignorati'] += 1
+            continue
+
+        nome = request.form.get(f'nome__{gid}', '').strip()
+        descrizione = request.form.get(f'descrizione__{gid}', '').strip()
+        data_str = request.form.get(f'data__{gid}', '')
+        ora_str = request.form.get(f'ora__{gid}', '')
+        durata = request.form.get(f'durata__{gid}', type=int)
+        sala_id = request.form.get(f'sala__{gid}', type=int)
+        evento_id_esistente = request.form.get(f'evento_id__{gid}', type=int)
+
+        try:
+            data_obj = datetime.strptime(data_str, '%Y-%m-%d').date()
+            ora_obj = datetime.strptime(ora_str, '%H:%M').time()
+        except ValueError:
+            contatori['errori'] += 1
+            flash(f'Riga "{nome}": data/ora non valide, saltata.', 'danger')
+            continue
+
+        if not sala_id:
+            contatori['errori'] += 1
+            flash(f'Riga "{nome}": nessuna sala di destinazione selezionata, saltata.', 'danger')
+            continue
+
+        if azione == 'aggiorna':
+            evento = db.session.get(Evento, evento_id_esistente) if evento_id_esistente else None
+            if not evento:
+                contatori['errori'] += 1
+                flash(f'Riga "{nome}": evento da aggiornare non trovato, saltata.', 'danger')
+                continue
+            evento.nome = nome
+            evento.descrizione = descrizione
+            evento.data_evento = data_obj
+            evento.ora_inizio = ora_obj
+            evento.durata = durata
+            evento.sala_id = sala_id
+            evento.google_updated = datetime.utcnow()
+            contatori['aggiornati'] += 1
+
+        elif azione == 'sostituisci':
+            evento_vecchio = db.session.get(Evento, evento_id_esistente) if evento_id_esistente else None
+            if evento_vecchio:
+                db.session.delete(evento_vecchio)
+                db.session.flush()
+            _, errore = _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, gid)
+            if errore:
+                contatori['errori'] += 1
+                flash(f'Riga "{nome}": {errore}, impossibile creare l\'evento.', 'danger')
+                continue
+            contatori['sostituiti'] += 1
+
+        elif azione == 'importa_nuovo':
+            _, errore = _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, gid)
+            if errore:
+                contatori['errori'] += 1
+                flash(f'Riga "{nome}": {errore}, impossibile creare l\'evento.', 'danger')
+                continue
+            contatori['importati'] += 1
+
+        elif azione == 'mantieni_entrambi':
+            # Evento aggiuntivo separato, SENZA google_event_id: l'evento originale
+            # resta l'unico collegato a questo id Google nei futuri import.
+            _, errore = _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, None)
+            if errore:
+                contatori['errori'] += 1
+                flash(f'Riga "{nome}": {errore}, impossibile creare l\'evento.', 'danger')
+                continue
+            contatori['mantenuti_entrambi'] += 1
+
+    for evento_id_str in request.form.getlist('cancel_evento_id'):
+        evento_id = int(evento_id_str)
+        azione_cancel = request.form.get(f'azione_cancel__{evento_id}', 'ignora')
+        evento = db.session.get(Evento, evento_id)
+        if not evento:
+            continue
+        if azione_cancel == 'annulla':
+            evento.cancellato_google = True
+        elif azione_cancel == 'elimina':
+            db.session.delete(evento)
+
+    db.session.commit()
+
+    riepilogo = (
+        f"Import completato — nuovi: {contatori['importati']}, aggiornati: {contatori['aggiornati']}, "
+        f"sostituiti: {contatori['sostituiti']}, mantenuti entrambi: {contatori['mantenuti_entrambi']}, "
+        f"ignorati: {contatori['ignorati']}" + (f", errori: {contatori['errori']}" if contatori['errori'] else "")
+    )
+    flash(riepilogo, 'success' if not contatori['errori'] else 'warning')
+    return redirect(url_for('admin_google_import', calendar_id=calendar_id, giorni=giorni))
 
 
 if __name__ == '__main__':

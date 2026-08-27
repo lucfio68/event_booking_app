@@ -93,6 +93,13 @@ class Evento(db.Model):
     genere_evento_id = db.Column(db.Integer, db.ForeignKey('genere_evento.id'), nullable=True)
     overbooking_abilitato = db.Column(db.Boolean, default=False, nullable=False)  # se True, l'evento può superare sala.posti_max (fino a +overbooking_max); serve anche per abilitare aggiunte future oltre il limite
 
+    # Fase B - Step 3: tracciabilità import da Google Calendar
+    origine = db.Column(db.String(20), nullable=False, default='app')  # 'app' | 'google'
+    google_event_id = db.Column(db.String(255), nullable=True, index=True)  # id dell'istanza Google (univoco anche per occorrenze di eventi ricorrenti)
+    google_calendar_id_origine = db.Column(db.String(255), nullable=True)  # da quale calendario Google è stato importato
+    google_updated = db.Column(db.DateTime, nullable=True)  # ultimo campo 'updated' noto lato Google, per rilevare modifiche successive
+    cancellato_google = db.Column(db.Boolean, nullable=False, default=False)  # evento rimosso dal calendario Google sorgente ma mantenuto in app (non più prenotabile)
+
     posti = db.relationship('Posto', backref='evento', lazy=True, cascade='all, delete-orphan')
     prenotazioni = db.relationship('Prenotazione', backref='evento', lazy=True, cascade='all, delete-orphan')
 

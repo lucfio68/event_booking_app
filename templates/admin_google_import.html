@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Import da Google Calendar{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <h2>⬇️🗓️ Import eventi da Google Calendar</h2>
+    <p class="text-muted">
+        Scegli un calendario sorgente e un periodo: vedrai un'anteprima di tutti gli eventi trovati,
+        con lo stato rispetto a quanto già presente nell'app. Nessuna modifica viene applicata finché
+        non premi "Applica modifiche selezionate" in fondo alla pagina.
+    </p>
+
+    {% if errore_calendari %}<div class="alert alert-danger">{{ errore_calendari }}</div>{% endif %}
+    {% if errore_import %}<div class="alert alert-danger">{{ errore_import }}</div>{% endif %}
+
+    <div class="form-card">
+        <form method="GET" action="{{ url_for('admin_google_import') }}" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+            <div>
+                <label>Calendario sorgente</label><br>
+                <select name="calendar_id" class="form-control" required>
+                    <option value="">-- seleziona --</option>
+                    {% for cal in (calendari or []) %}
+                    <option value="{{ cal.id }}" {% if cal.id == calendar_id %}selected{% endif %}>
+                        {{ cal.summary }}{% if cal.primary %} (principale){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>Importa eventi nei prossimi</label><br>
+                <input type="number" name="giorni" value="{{ giorni }}" min="1" max="365" class="form-control" style="width:90px;"> giorni
+            </div>
+            <button type="submit" class="btn btn-primary">🔍 Cerca eventi</button>
+        </form>
+    </div>
+
+    {% if calendar_id and not errore_import %}
+    <form method="POST" action="{{ url_for('admin_google_import_applica') }}">
+        <input type="hidden" name="calendar_id" value="{{ calendar_id }}">
+        <input type="hidden" name="giorni" value="{{ giorni }}">
+
+        {% macro select_sala(field_name, selected_id) %}
+        <select name="{{ field_name }}" class="form-control">
+            <option value="">-- scegli sala --</option>
+            {% for s in sale %}
+            <option value="{{ s.id }}" {% if s.id == selected_id %}selected{% endif %}>{{ s.nome }}</option>
+            {% endfor %}
+        </select>
+        {% endmacro %}
+
+        {# ---------------- EVENTI NUOVI ---------------- #}
+        <div class="prenotazioni-list">
+            <h3>🆕 Eventi nuovi ({{ righe_nuovi|length }})</h3>
+            {% if righe_nuovi %}
+            <table class="table">
+                <thead><tr><th>Nome</th><th>Data</th><th>Ora</th><th>Durata</th><th>Sala destinazione</th><th>Azione</th></tr></thead>
+                <tbody>
+                    {% for r in righe_nuovi %}
+                    <tr>
+                        <td>
+                        <input type="hidden" name="gid" value="{{ r.google_event_id }}">
+                        <input type="hidden" name="nome__{{ r.google_event_id }}" value="{{ r.nome }}">
+                        <input type="hidden" name="descrizione__{{ r.google_event_id }}" value="{{ r.descrizione }}">
+                        <input type="hidden" name="data__{{ r.google_event_id }}" value="{{ r.data_evento.strftime('%Y-%m-%d') }}">
+                        <input type="hidden" name="ora__{{ r.google_event_id }}" value="{{ r.ora_inizio.strftime('%H:%M') }}">
+                        <input type="hidden" name="durata__{{ r.google_event_id }}" value="{{ r.durata }}">
+                        {{ r.nome }}{% if r.link_google %} <a href="{{ r.link_google }}" target="_blank" title="Apri su Google Calendar">🔗</a>{% endif %}
+                        </td>
+                        <td>{{ r.data_evento.strftime('%d/%m/%Y') }}</td>
+                        <td>{{ r.ora_inizio.strftime('%H:%M') }}</td>
+                        <td>{{ r.durata }} min</td>
+                        <td>{{ select_sala('sala__' ~ r.google_event_id, r.sala_suggerita) }}</td>
+                        <td>
+                            <select name="azione__{{ r.google_event_id }}" class="form-control">
+                                <option value="ignora" selected>Ignora</option>
+                                <option value="importa_nuovo">Importa come nuovo</option>
+                            </select>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}<p class="text-muted">Nessun evento nuovo trovato.</p>{% endif %}
+        </div>
+
+        {# ---------------- EVENTI MODIFICATI ---------------- #}
+        <div class="prenotazioni-list">
+            <h3>✏️ Eventi già importati, modificati su Google ({{ righe_modificati|length }})</h3>
+            {% if righe_modificati %}
+            <table class="table">
+                <thead><tr><th>Nome</th><th>Differenze rilevate</th><th>Sala</th><th>Azione</th></tr></thead>
+                <tbody>
+                    {% for r in righe_modificati %}
+                    <tr>
+                        <td>
+                        <input type="hidden" name="gid" value="{{ r.google_event_id }}">
+                        <input type="hidden" name="evento_id__{{ r.google_event_id }}" value="{{ r.evento_id }}">
+                        <input type="hidden" name="nome__{{ r.google_event_id }}" value="{{ r.nome }}">
+                        <input type="hidden" name="descrizione__{{ r.google_event_id }}" value="{{ r.descrizione }}">
+                        <input type="hidden" name="data__{{ r.google_event_id }}" value="{{ r.data_evento.strftime('%Y-%m-%d') }}">
+                        <input type="hidden" name="ora__{{ r.google_event_id }}" value="{{ r.ora_inizio.strftime('%H:%M') }}">
+                        <input type="hidden" name="durata__{{ r.google_event_id }}" value="{{ r.durata }}">
+                        {{ r.nome }}{% if r.link_google %} <a href="{{ r.link_google }}" target="_blank">🔗</a>{% endif %}
+                            {% if r.ha_prenotazioni %}<br><span class="badge">ha prenotazioni</span>{% endif %}
+                        </td>
+                        <td>
+                            <ul style="margin:0; padding-left:18px;">
+                            {% for campo, vecchio, nuovo in r.differenze %}
+                                <li><strong>{{ campo }}:</strong> {{ vecchio }} → {{ nuovo }}</li>
+                            {% endfor %}
+                            </ul>
+                        </td>
+                        <td>{{ select_sala('sala__' ~ r.google_event_id, r.sala_attuale_id) }}</td>
+                        <td>
+                            <select name="azione__{{ r.google_event_id }}" class="form-control">
+                                <option value="ignora">Ignora</option>
+                                <option value="aggiorna" selected>Aggiorna (mantiene posti/prenotazioni)</option>
+                                <option value="sostituisci">Sostituisci (ricrea da zero, perde prenotazioni)</option>
+                                <option value="mantieni_entrambi">Mantieni entrambi (crea un evento separato)</option>
+                            </select>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}<p class="text-muted">Nessun evento modificato.</p>{% endif %}
+        </div>
+
+        {# ---------------- EVENTI INVARIATI ---------------- #}
+        <div class="prenotazioni-list">
+            <h3>✅ Eventi già importati, invariati ({{ righe_invariati|length }})</h3>
+            {% if righe_invariati %}
+            <table class="table">
+                <thead><tr><th>Nome</th><th>Data</th><th>Ora</th><th>Sala</th><th>Azione</th></tr></thead>
+                <tbody>
+                    {% for r in righe_invariati %}
+                    <tr>
+                        <td>
+                        <input type="hidden" name="gid" value="{{ r.google_event_id }}">
+                        <input type="hidden" name="evento_id__{{ r.google_event_id }}" value="{{ r.evento_id }}">
+                        <input type="hidden" name="nome__{{ r.google_event_id }}" value="{{ r.nome }}">
+                        <input type="hidden" name="descrizione__{{ r.google_event_id }}" value="{{ r.descrizione }}">
+                        <input type="hidden" name="data__{{ r.google_event_id }}" value="{{ r.data_evento.strftime('%Y-%m-%d') }}">
+                        <input type="hidden" name="ora__{{ r.google_event_id }}" value="{{ r.ora_inizio.strftime('%H:%M') }}">
+                        <input type="hidden" name="durata__{{ r.google_event_id }}" value="{{ r.durata }}">
+                        {{ r.nome }}
+                        </td>
+                        <td>{{ r.data_evento.strftime('%d/%m/%Y') }}</td>
+                        <td>{{ r.ora_inizio.strftime('%H:%M') }}</td>
+                        <td>{{ select_sala('sala__' ~ r.google_event_id, r.sala_attuale_id) }}</td>
+                        <td>
+                            <select name="azione__{{ r.google_event_id }}" class="form-control">
+                                <option value="ignora" selected>Ignora</option>
+                                <option value="aggiorna">Aggiorna</option>
+                                <option value="sostituisci">Sostituisci</option>
+                                <option value="mantieni_entrambi">Mantieni entrambi</option>
+                            </select>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}<p class="text-muted">Nessun evento invariato.</p>{% endif %}
+        </div>
+
+        {# ---------------- EVENTI NON IMPORTABILI ---------------- #}
+        {% if righe_non_importabili %}
+        <div class="prenotazioni-list">
+            <h3>⚠️ Non importabili ({{ righe_non_importabili|length }})</h3>
+            <table class="table">
+                <thead><tr><th>Nome</th><th>Motivo</th></tr></thead>
+                <tbody>
+                    {% for r in righe_non_importabili %}
+                    <tr>
+                        <td>{{ r.nome }}{% if r.link_google %} <a href="{{ r.link_google }}" target="_blank">🔗</a>{% endif %}</td>
+                        <td>{{ r.motivo }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {# ---------------- EVENTI CANCELLATI SU GOOGLE ---------------- #}
+        <div class="prenotazioni-list">
+            <h3>🗑️ Rimossi dal calendario Google (in app dal periodo scansionato) ({{ righe_cancellati|length }})</h3>
+            {% if righe_cancellati %}
+            <table class="table">
+                <thead><tr><th>Nome</th><th>Data</th><th>Sala</th><th>Azione</th></tr></thead>
+                <tbody>
+                    {% for r in righe_cancellati %}
+                    <tr>
+                        <td>
+                        <input type="hidden" name="cancel_evento_id" value="{{ r.evento_id }}">
+                        {{ r.nome }}{% if r.ha_prenotazioni %}<br><span class="badge">ha prenotazioni</span>{% endif %}
+                        </td>
+                        <td>{{ r.data_evento.strftime('%d/%m/%Y') }} {{ r.ora_inizio.strftime('%H:%M') }}</td>
+                        <td>{{ r.sala }}</td>
+                        <td>
+                            <select name="azione_cancel__{{ r.evento_id }}" class="form-control">
+                                <option value="ignora" selected>Ignora (lascia com'è)</option>
+                                <option value="annulla">Segna come annullato (non più prenotabile, prenotazioni mantenute)</option>
+                                <option value="elimina">Elimina definitivamente (cancella anche le prenotazioni)</option>
+                            </select>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}<p class="text-muted">Nessun evento risulta rimosso dal calendario sorgente in questo periodo.</p>{% endif %}
+        </div>
+
+        {% if righe_nuovi or righe_modificati or righe_invariati or righe_cancellati %}
+        <button type="submit" class="btn btn-primary" style="margin-top:15px;"
+                onclick="return confirm('Applicare le modifiche selezionate? Le righe con azione \'Ignora\' non verranno toccate.');">
+            ✅ Applica modifiche selezionate
+        </button>
+        {% endif %}
+    </form>
+    {% endif %}
+
+    <div style="margin-top:20px;">
+        <a href="{{ url_for('admin_google_sale') }}" class="btn btn-outline">Sale ↔ Calendari</a>
+        <a href="{{ url_for('admin_google_status') }}" class="btn btn-outline">Google Calendar</a>
+    </div>
+</div>
+{% endblock %}
