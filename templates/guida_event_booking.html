@@ -326,6 +326,9 @@
         <li><a href="#admin-abbonato">3.12 Posti Abbonato</a></li>
         <li><a href="#admin-riserva">3.13 Riservare Posti</a></li>
         <li><a href="#admin-cancella">3.14 Cancellare Prenotazioni</a></li>
+        <li><a href="#admin-google-oauth">3.15 Google Calendar — Connessione</a></li>
+        <li><a href="#admin-google-sale">3.16 Google Calendar — Sale ↔ Calendari</a></li>
+        <li><a href="#admin-google-import">3.17 Google Calendar — Import Eventi</a></li>
         <li><a href="#schema">4. Schema Database</a></li>
         <li><a href="#faq-overbooking">4.1 Overbooking — come funziona</a></li>
         {% endif %}
@@ -349,6 +352,7 @@
         <li>Database cloud su Neon PostgreSQL</li>
         <li>Installabile come app (PWA) su smartphone e desktop, con icona propria e funzionamento offline della shell dell'app</li>
         <li>Recupero password via email in caso di smarrimento credenziali</li>
+        <li>Import eventi da Google Calendar con anteprima e controllo riga per riga (Fase B, riservato agli admin)</li>
     </ul>
     <h3>Tipologie di utente</h3>
     <table>
@@ -473,6 +477,9 @@
         <tr><td>Giorno con bordo blu</td><td>E' oggi</td></tr>
         <tr><td>Giorno grigio</td><td>Data passata (non selezionabile)</td></tr>
     </table>
+    <div class="alert alert-info">
+        <strong>Nota:</strong> alcuni eventi possono provenire da un calendario Google collegato dall'amministratore. Se un organizzatore annulla un evento sul calendario di origine, l'evento sparisce automaticamente dal calendario di EventBooking per tutti gli utenti.
+    </div>
     <h3>Interazione con le date</h3>
     <div class="step">
         <div class="step-num">1</div>
@@ -574,6 +581,9 @@
     </div>
     <div class="alert alert-warning">
         <strong>Attenzione:</strong> Una volta confermata, la prenotazione non puo' essere annullata direttamente dall'utente. Contatta un amministratore per modifiche.
+    </div>
+    <div class="alert alert-info">
+        <strong>Evento non più disponibile?</strong> Se apri un link di prenotazione salvato in precedenza e l'evento è stato nel frattempo annullato (perché rimosso dal calendario Google di origine), vedrai un messaggio che te lo segnala e verrai riportato al calendario.
     </div>
     <div class="screenshot">[Screenshot: Layout sala con posti colorati, fila A, B, C... e colonne numerate]</div>
 </div>
@@ -1178,6 +1188,123 @@ source venv/bin/activate    (Linux/Mac)</pre>
     </div>
 </div>
 
+<div class="section" id="admin-google-oauth">
+    <h2><span class="badge badge-admin">Admin</span> 3.15 Google Calendar — Connessione</h2>
+    <p>EventBooking può importare eventi da Google Calendar. Il primo passo, una tantum, è collegare un account Google.</p>
+    <div class="alert alert-info">
+        <strong>Un solo account alla volta:</strong> l'app supporta un unico account Google collegato per tutta l'applicazione (non uno per sala). Quell'account può comunque vedere <strong>più calendari</strong> — il proprio calendario principale, eventuali calendari secondari, e calendari di altri organizzatori se condivisi con quell'account. È così che si importa da più fonti senza dover collegare account diversi. Va bene un normale account Gmail, non serve Google Workspace.
+    </div>
+    <h3>Collegare l'account</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Apri "Google Calendar"</h4>
+            <p>Dal menu di navigazione (visibile solo agli admin), clicca <strong>🗓️ Google Calendar</strong>.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Collega Account Google</h4>
+            <p>Clicca <strong>🔗 Collega Account Google</strong>. Verrai reindirizzato alla schermata di consenso di Google: scegli l'account e concedi i permessi richiesti (lettura calendari ed eventi).</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Verifica la connessione</h4>
+            <p>Tornato su EventBooking, vedrai l'email dell'account collegato. Clicca <strong>🔍 Testa connessione</strong> per elencare tutti i calendari visibili da quell'account: è la conferma che tutto funziona.</p>
+        </div>
+    </div>
+    <div class="alert alert-warning">
+        <strong>Scollegare:</strong> il pulsante <strong>Scollega</strong> rimuove la connessione. Le eventuali associazioni Sala↔Calendario (vedi sezione successiva) restano salvate ma andranno ricontrollate ricollegando un account.
+    </div>
+</div>
+
+<div class="section" id="admin-google-sale">
+    <h2><span class="badge badge-admin">Admin</span> 3.16 Google Calendar — Sale ↔ Calendari</h2>
+    <p>Ogni sala può avere un unico calendario Google "proprio" associato — sarà il calendario di riferimento della sala (usato per l'esportazione in una fase futura, e proposto come suggerimento predefinito durante l'import).</p>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Apri "Sale ↔ Calendari"</h4>
+            <p>Da <strong>Google Calendar</strong>, clicca <strong>🏛️ Sale ↔ Calendari</strong>. Vedrai l'elenco di tutte le sale con, per ciascuna, il calendario attualmente associato (se presente).</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Associa un calendario</h4>
+            <p>Per ogni sala, scegli un calendario dal menu a tendina (l'elenco viene dal vivo dall'account Google collegato) e clicca <strong>Salva</strong>.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Rimuovere un'associazione</h4>
+            <p>Clicca <strong>Rimuovi</strong> sulla riga della sala interessata. La sala tornerà a non avere nessun calendario associato.</p>
+        </div>
+    </div>
+    <div class="alert alert-info">
+        <strong>Nota:</strong> questa associazione non limita da dove importare (vedi sezione successiva: si può importare in qualunque sala da qualunque calendario visibile). Serve solo a suggerire automaticamente la sala di destinazione quando importi da quel calendario specifico.
+    </div>
+</div>
+
+<div class="section" id="admin-google-import">
+    <h2><span class="badge badge-admin">Admin</span> 3.17 Google Calendar — Import Eventi</h2>
+    <p>Permette di importare eventi da un calendario Google come <strong>eventi prenotabili veri e propri</strong> nell'app, con un'anteprima che mostra sempre tutto prima di applicare qualunque modifica.</p>
+    <div class="alert alert-warning">
+        <strong>Prima del primo utilizzo:</strong> un amministratore deve visitare una volta la route <code>/admin/migrate-google-import?key=&lt;MIGRATION_SECRET&gt;</code> (stessa chiave già usata per le altre migrazioni) per preparare il database. Senza questo passaggio l'import non funziona.
+    </div>
+    <h3>Procedura</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Apri "Importa eventi"</h4>
+            <p>Da <strong>Google Calendar</strong>, clicca <strong>⬇️ Importa eventi</strong>.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Scegli calendario e periodo</h4>
+            <p>Seleziona il <strong>calendario sorgente</strong> (uno qualsiasi tra quelli visibili dall'account collegato, non necessariamente quello associato a una sala) e il numero di giorni da "oggi" da esplorare. Clicca <strong>🔍 Cerca eventi</strong>.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Rivedi l'anteprima</h4>
+            <p>Gli eventi trovati vengono divisi in sezioni:</p>
+            <ul>
+                <li><strong>🆕 Nuovi</strong>: non ancora presenti in EventBooking. Scegli la sala di destinazione e l'azione <em>Importa come nuovo</em> (o lascia <em>Ignora</em> per saltarli).</li>
+                <li><strong>✏️ Modificati</strong>: importati in precedenza, ma con nome/data/ora/durata cambiati su Google — vengono mostrate le differenze campo per campo. Puoi scegliere <em>Aggiorna</em> (aggiorna i dati mantenendo posti e prenotazioni esistenti), <em>Sostituisci</em> (ricrea l'evento da zero: <strong>le prenotazioni esistenti su quell'evento andranno perse</strong>), <em>Mantieni entrambi</em> (lascia l'evento esistente com'è e ne crea uno nuovo separato) oppure <em>Ignora</em>.</li>
+                <li><strong>✅ Invariati</strong>: già importati e identici a Google, nessuna azione necessaria (default <em>Ignora</em>).</li>
+                <li><strong>⚠️ Non importabili</strong>: eventi "intera giornata" (senza un orario preciso) — non supportati in questa versione.</li>
+                <li><strong>🗑️ Rimossi dal calendario Google</strong>: eventi importati in precedenza che non compaiono più tra i risultati (probabilmente cancellati su Google). Puoi <em>Ignorare</em>, <em>Segnare come annullato</em> (l'evento sparisce dal calendario prenotabile per tutti ma resta nel database con le sue prenotazioni, utile per contattare i partecipanti) oppure <em>Eliminare definitivamente</em> (cancella anche le prenotazioni, irreversibile).</li>
+            </ul>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            <h4>Applica</h4>
+            <p>Clicca <strong>✅ Applica modifiche selezionate</strong> in fondo alla pagina. Solo le righe con un'azione diversa da "Ignora" vengono toccate.</p>
+        </div>
+    </div>
+    <div class="alert alert-danger">
+        <strong>Prima di annullare o eliminare un evento importato con prenotazioni:</strong> non esiste ancora, in questa versione, una schermata dedicata per consultare le prenotazioni di un evento dopo che è sparito dal calendario. Prendi nota dei dettagli (partecipanti, posti) <em>prima</em> di confermare, se prevedi di doverli contattare.
+    </div>
+    <h3>Dettagli tecnici utili da sapere</h3>
+    <table>
+        <tr><th>Aspetto</th><th>Comportamento</th></tr>
+        <tr><td>Fuso orario</td><td>Fisso su Europe/Rome, indipendentemente dal fuso salvato nell'evento Google</td></tr>
+        <tr><td>Eventi ricorrenti</td><td>Ogni occorrenza nel periodo scelto viene importata come evento singolo indipendente, senza legame con la serie originale</td></tr>
+        <tr><td>Layout posti</td><td>Un nuovo evento importato usa sempre il layout contrassegnato come predefinito per la sala scelta. Se la sala non ha un layout predefinito, la riga non è importabile finché non ne crei uno in <a href="#admin-layout-posti">Layout Posti</a></td></tr>
+        <tr><td>Scrittura su Google</td><td>Nessuna: l'import è di sola lettura verso Google Calendar</td></tr>
+    </table>
+</div>
+
 <div class="section" id="schema">
     <h2>🗄️ 4. Schema Database</h2>
     <p>L'applicazione utilizza PostgreSQL (Neon) con il seguente schema relazionale:</p>
@@ -1205,39 +1332,80 @@ source venv/bin/activate    (Linux/Mac)</pre>
 │ descrizione     │ TEXT        │ No       │ Dettagli e dotazioni        │
 │ indirizzo       │ VARCHAR(255)│ No       │ Indirizzo fisico            │
 │ posti_max       │ INTEGER     │ Si'       │ Capacita' massima            │
+│ overbooking_max │ INTEGER     │ No       │ Tetto extra posti (0=nessuno)│
 │ email_admin     │ TEXT        │ No       │ Email separate da virgola   │
 └─────────────────┴─────────────┴──────────┴─────────────────────────────┘
     </div>
-    <h3>Tabella <code>evento</code></h3>
+    <h3>Tabella <code>genere_evento</code></h3>
     <div class="schema-box">
 ┌─────────────────┬─────────────┬──────────┬─────────────────────────────┐
 │ Campo           │ Tipo        │ Obblig.  │ Note                        │
 ├─────────────────┼─────────────┼──────────┼─────────────────────────────┤
 │ id              │ INTEGER PK  │ Si'       │ Auto-increment              │
-│ nome            │ VARCHAR(150)│ Si'       │ Titolo evento               │
+│ nome            │ VARCHAR(100)│ Si'       │ es. "Concerto", "Teatro"    │
 │ descrizione     │ TEXT        │ No       │ Dettagli                    │
-│ data_evento     │ DATE        │ Si'       │ Data dell'evento            │
-│ ora_inizio      │ TIME        │ Si'       │ Ora di inizio               │
-│ durata          │ INTEGER     │ Si'       │ Durata in minuti           │
-│ posti_max       │ INTEGER     │ Si'       │ File x colonne              │
-│ file            │ INTEGER     │ Si'       │ Numero file (A, B, C...)    │
-│ colonne         │ INTEGER     │ Si'       │ Numero colonne              │
-│ sala_id         │ INTEGER FK  │ Si'       │ -> sala.id                   │
-│ creato_da       │ INTEGER FK  │ Si'       │ -> utente.id                 │
-│ data_creazione  │ DATETIME    │ No       │ Auto                        │
 └─────────────────┴─────────────┴──────────┴─────────────────────────────┘
+    </div>
+    <h3>Tabella <code>layout_posti</code></h3>
+    <div class="schema-box">
+┌─────────────────────┬─────────────┬──────────┬─────────────────────────────┐
+│ Campo               │ Tipo        │ Obblig.  │ Note                        │
+├─────────────────────┼─────────────┼──────────┼─────────────────────────────┤
+│ id                  │ INTEGER PK  │ Si'       │ Auto-increment              │
+│ sala_id             │ INTEGER FK  │ Si'       │ -> sala.id                   │
+│ genere_evento_id    │ INTEGER FK  │ No       │ -> genere_evento.id (NULL=generico) │
+│ nome                │ VARCHAR(100)│ Si'       │ es. "Platea intera"         │
+│ file                │ INTEGER     │ Si'       │ Numero file                 │
+│ colonne             │ INTEGER     │ Si'       │ Numero colonne              │
+│ corridoio_colonne   │ VARCHAR(50) │ No       │ Colonne dopo cui c'è corridoio │
+│ corridoio_file      │ VARCHAR(50) │ No       │ File dopo cui c'è corridoio │
+│ is_default          │ BOOLEAN     │ No       │ Layout predefinito per sala/genere │
+│ overbooking_abilitato│ BOOLEAN    │ No       │ Se True può superare sala.posti_max │
+│ creato_da           │ INTEGER FK  │ No       │ -> utente.id                 │
+│ data_creazione      │ DATETIME    │ No       │ Auto                        │
+└─────────────────────┴─────────────┴──────────┴─────────────────────────────┘
+    </div>
+    <h3>Tabella <code>evento</code></h3>
+    <div class="schema-box">
+┌─────────────────────────┬─────────────┬──────────┬─────────────────────────────┐
+│ Campo                   │ Tipo        │ Obblig.  │ Note                        │
+├─────────────────────────┼─────────────┼──────────┼─────────────────────────────┤
+│ id                      │ INTEGER PK  │ Si'       │ Auto-increment              │
+│ nome                    │ VARCHAR(150)│ Si'       │ Titolo evento               │
+│ descrizione             │ TEXT        │ No       │ Dettagli                    │
+│ data_evento             │ DATE        │ Si'       │ Data dell'evento            │
+│ ora_inizio              │ TIME        │ Si'       │ Ora di inizio               │
+│ durata                  │ INTEGER     │ Si'       │ Durata in minuti           │
+│ posti_max               │ INTEGER     │ Si'       │ File x colonne              │
+│ file                    │ INTEGER     │ Si'       │ Numero file (A, B, C...)    │
+│ colonne                 │ INTEGER     │ Si'       │ Numero colonne              │
+│ corridoio_colonne       │ VARCHAR(50) │ No       │ Colonne dopo cui c'è corridoio │
+│ corridoio_file          │ VARCHAR(50) │ No       │ File dopo cui c'è corridoio │
+│ sala_id                 │ INTEGER FK  │ Si'       │ -> sala.id                   │
+│ creato_da               │ INTEGER FK  │ Si'       │ -> utente.id                 │
+│ data_creazione          │ DATETIME    │ No       │ Auto                        │
+│ layout_posti_id         │ INTEGER FK  │ No       │ -> layout_posti.id (tracciabilità) │
+│ genere_evento_id        │ INTEGER FK  │ No       │ -> genere_evento.id          │
+│ overbooking_abilitato   │ BOOLEAN     │ No       │ Se True può superare sala.posti_max │
+│ origine                 │ VARCHAR(20) │ No       │ 'app' (default) o 'google'  │
+│ google_event_id         │ VARCHAR(255)│ No       │ Id istanza Google (Fase B)  │
+│ google_calendar_id_origine│VARCHAR(255)│ No      │ Calendario Google di provenienza │
+│ google_updated          │ DATETIME    │ No       │ Ultimo 'updated' noto da Google │
+│ cancellato_google       │ BOOLEAN     │ No       │ Rimosso da Google, non più prenotabile │
+└─────────────────────────┴─────────────┴──────────┴─────────────────────────────┘
     </div>
     <h3>Tabella <code>prenotazione</code></h3>
     <div class="schema-box">
-┌─────────────────┬─────────────┬──────────┬─────────────────────────────┐
-│ Campo           │ Tipo        │ Obblig.  │ Note                        │
-├─────────────────┼─────────────┼──────────┼─────────────────────────────┤
-│ id              │ INTEGER PK  │ Si'       │ Auto-increment              │
-│ evento_id       │ INTEGER FK  │ Si'       │ -> evento.id                 │
-│ utente_id       │ INTEGER FK  │ Si'       │ -> utente.id                 │
-│ stato           │ VARCHAR(50) │ No       │ confermata / annullata / abbonata   │
-│ data_prenotazione│ DATETIME   │ No       │ Auto                        │
-└─────────────────┴─────────────┴──────────┴─────────────────────────────┘
+┌─────────────────────┬─────────────┬──────────┬─────────────────────────────┐
+│ Campo               │ Tipo        │ Obblig.  │ Note                        │
+├─────────────────────┼─────────────┼──────────┼─────────────────────────────┤
+│ id                  │ INTEGER PK  │ Si'       │ Auto-increment              │
+│ evento_id           │ INTEGER FK  │ Si'       │ -> evento.id                 │
+│ utente_id           │ INTEGER FK  │ Si'       │ -> utente.id                 │
+│ nome_prenotazione   │ VARCHAR(150)│ No       │ Nome mostrato sui posti      │
+│ stato               │ VARCHAR(50) │ No       │ confermata / annullata / abbonata   │
+│ data_prenotazione   │ DATETIME    │ No       │ Auto                        │
+└─────────────────────┴─────────────┴──────────┴─────────────────────────────┘
     </div>
     <h3>Tabella <code>posto</code></h3>
     <div class="schema-box">
@@ -1254,6 +1422,35 @@ source venv/bin/activate    (Linux/Mac)</pre>
 │ prenotazione_id │ INTEGER FK  │ No       │ -> prenotazione.id (nullable)│
 └─────────────────┴─────────────┴──────────┴─────────────────────────────┘
     </div>
+    <h3>Tabella <code>google_connessione</code> <span style="font-weight:normal; font-size:0.8em;">(Fase B)</span></h3>
+    <div class="schema-box">
+┌─────────────────────┬─────────────┬──────────┬─────────────────────────────┐
+│ Campo               │ Tipo        │ Obblig.  │ Note                        │
+├─────────────────────┼─────────────┼──────────┼─────────────────────────────┤
+│ id                  │ INTEGER PK  │ Si'       │ Auto-increment              │
+│ utente_id           │ INTEGER FK  │ Si'       │ -> utente.id (admin che ha collegato) │
+│ email_google        │ VARCHAR(255)│ Si'       │ Solo per mostrarla in UI     │
+│ refresh_token_cifrato│ TEXT       │ Si'       │ Cifrato con Fernet          │
+│ scopes              │ TEXT        │ No       │ Scope OAuth concessi        │
+│ data_connessione    │ DATETIME    │ No       │ Auto                        │
+│ ultimo_utilizzo     │ DATETIME    │ No       │ Ultimo test/uso riuscito    │
+└─────────────────────┴─────────────┴──────────┴─────────────────────────────┘
+    <p style="font-size:0.85em; color:#666;">Una sola riga rappresenta la connessione attiva: collegarne un'altra sostituisce la precedente.</p>
+    </div>
+    <h3>Tabella <code>calendario_google</code> <span style="font-weight:normal; font-size:0.8em;">(Fase B)</span></h3>
+    <div class="schema-box">
+┌─────────────────────┬─────────────┬──────────┬─────────────────────────────┐
+│ Campo               │ Tipo        │ Obblig.  │ Note                        │
+├─────────────────────┼─────────────┼──────────┼─────────────────────────────┤
+│ id                  │ INTEGER PK  │ Si'       │ Auto-increment              │
+│ sala_id             │ INTEGER FK  │ Si'       │ -> sala.id (univoco: 1 calendario/sala) │
+│ google_calendar_id  │ VARCHAR(255)│ Si'       │ Id calendario su Google     │
+│ nome_calendario     │ VARCHAR(255)│ Si'       │ Nome del calendario (cache) │
+│ attivo              │ BOOLEAN     │ No       │ Associazione attiva         │
+│ data_associazione   │ DATETIME    │ No       │ Auto                        │
+│ data_modifica       │ DATETIME    │ No       │ Auto                        │
+└─────────────────────┴─────────────┴──────────┴─────────────────────────────┘
+    </div>
     <h3>Relazioni</h3>
     <ul>
         <li><code>sala</code> -> <code>evento</code> (1:N)</li>
@@ -1265,6 +1462,8 @@ source venv/bin/activate    (Linux/Mac)</pre>
         <li><code>sala</code> -> <code>layout_posti</code> (1:N)</li>
         <li><code>genere_evento</code> -> <code>layout_posti</code> (1:N, opzionale)</li>
         <li><code>layout_posti</code> -> <code>evento</code> (1:N, tracciabilità)</li>
+        <li><code>sala</code> -> <code>calendario_google</code> (1:1, Fase B)</li>
+        <li><code>utente</code> -> <code>google_connessione</code> (1:N, ma una sola attiva alla volta, Fase B)</li>
     </ul>
 </div>
 
@@ -1354,6 +1553,14 @@ source venv/bin/activate    (Linux/Mac)</pre>
 {% if current_user.is_admin() %}
 <div class="section" id="changelog">
     <h2>📝 6. Changelog</h2>
+
+    <h3>v1.8 (2026)</h3>
+    <ul>
+        <li><strong>Nuovo:</strong> Fase B (Import/Export Google Calendar) — Step 1: connessione OAuth a un account Google (pagina "Google Calendar")</li>
+        <li><strong>Nuovo:</strong> Step 2: associazione Sala ↔ Calendario Google (pagina "Sale ↔ Calendari")</li>
+        <li><strong>Nuovo:</strong> Step 3: import manuale con anteprima/diff — eventi nuovi/modificati/invariati/non importabili/rimossi, azioni riga per riga prima di applicare (pagina "Importa eventi")</li>
+        <li><strong>Nota:</strong> gli eventi annullati lato Google spariscono dal calendario per tutti gli utenti; le prenotazioni esistenti restano salvate nel database</li>
+    </ul>
 
     <h3>v1.7 (2026)</h3>
     <ul>
