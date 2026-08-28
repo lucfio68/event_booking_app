@@ -484,26 +484,68 @@
     <div class="step">
         <div class="step-num">1</div>
         <div class="step-content">
-            <h4>Clic singolo su una data</h4>
-            <p>Seleziona il giorno. Appariranno i pulsanti di azione:</p>
+            <h4>Doppio click su una data con evento (modo consigliato)</h4>
+            <p>Si apre subito una finestra (modale) che mostra:</p>
             <ul>
-                <li><strong>Prenota</strong> (se c'e' un evento in quella data)</li>
+                <li>La lista degli eventi di quel giorno</li>
+                <li>Pulsante <strong>Prenota</strong> per ogni evento</li>
             </ul>
-            <p>Le date passate non sono selezionabili.</p>
+            <p>È il modo più diretto per vedere gli eventi del giorno e prenotare.</p>
         </div>
     </div>
     <div class="step">
         <div class="step-num">2</div>
         <div class="step-content">
-            <h4>Doppio click su una data con evento</h4>
-            <p>Si apre un modale che mostra:</p>
-            <ul>
-                <li>La lista degli eventi di quel giorno</li>
-                <li>Pulsante <strong>Prenota</strong> per ogni evento</li>
-            </ul>
+            <h4>Clic singolo su una data</h4>
+            <p>Seleziona ed evidenzia il giorno, ma <strong>non apre nessuna finestra</strong>: comparirà solo un pulsante <strong>Prenota</strong> in un'area sotto il calendario, attivo unicamente se quel giorno ha un evento. Se non lo noti o sembra non succedere nulla, usa il doppio click (punto 1), che è immediato.</p>
+            <p>Le date passate non sono selezionabili.</p>
         </div>
     </div>
-    <div class="screenshot">[Screenshot: Calendario con anno, mese, giorni e eventi evidenziati]</div>
+    <div class="screenshot" style="background:#fff; border-style:solid; padding:15px;">
+        <svg viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg" style="width:100%; max-width:560px; height:auto;">
+            <rect x="0" y="0" width="640" height="360" fill="#fff"/>
+            <rect x="0" y="0" width="640" height="46" fill="#2c3e50" rx="6"/>
+            <text x="20" y="30" fill="#fff" font-family="Arial" font-size="17">◀</text>
+            <text x="45" y="30" fill="#fff" font-family="Arial" font-size="17" font-weight="bold">2026</text>
+            <text x="95" y="30" fill="#fff" font-family="Arial" font-size="17">▶</text>
+            <text x="270" y="30" fill="#fff" font-family="Arial" font-size="17">◀</text>
+            <text x="295" y="30" fill="#fff" font-family="Arial" font-size="17" font-weight="bold">Agosto</text>
+            <text x="380" y="30" fill="#fff" font-family="Arial" font-size="17">▶</text>
+            <g font-family="Arial" font-size="12" fill="#7f8c8d">
+                <text x="35" y="66">Lun</text><text x="123" y="66">Mar</text><text x="211" y="66">Mer</text>
+                <text x="299" y="66">Gio</text><text x="387" y="66">Ven</text><text x="475" y="66">Sab</text><text x="563" y="66">Dom</text>
+            </g>
+            <!-- griglia giorni -->
+            <g font-family="Arial" font-size="13">
+                <!-- riga 1 -->
+                <rect x="10" y="76" width="80" height="60" fill="#f5f5f5" stroke="#e0e0e0"/><text x="16" y="92" fill="#aaa">27</text>
+                <rect x="98" y="76" width="80" height="60" fill="#f5f5f5" stroke="#e0e0e0"/><text x="104" y="92" fill="#aaa">28</text>
+                <rect x="186" y="76" width="80" height="60" fill="#fff" stroke="#e0e0e0"/><text x="192" y="92">29</text>
+                <rect x="274" y="76" width="80" height="60" fill="#fff" stroke="#e0e0e0"/><text x="280" y="92">30</text>
+                <rect x="362" y="76" width="80" height="60" fill="#fff" stroke="#e0e0e0"/><text x="368" y="92">31</text>
+                <rect x="450" y="76" width="80" height="60" fill="#d5f2e3" stroke="#27ae60"/><text x="456" y="92">1</text>
+                <text x="456" y="108" fill="#27ae60" font-size="10">🎭 Concerto</text>
+                <rect x="538" y="76" width="80" height="60" fill="#fff" stroke="#e0e0e0"/><text x="544" y="92">2</text>
+                <!-- riga con OGGI -->
+                <rect x="10" y="140" width="80" height="60" fill="#fff" stroke="#e0e0e0"/><text x="16" y="156">3</text>
+                <rect x="98" y="140" width="80" height="60" fill="#fff" stroke="#3498db" stroke-width="3"/><text x="104" y="156" font-weight="bold">4</text>
+                <rect x="186" y="140" width="80" height="60" fill="#d5f2e3" stroke="#27ae60"/><text x="192" y="156">5</text>
+                <text x="192" y="172" fill="#27ae60" font-size="10">🎤 Teatro</text>
+                <rect x="274" y="140" width="80" height="60" fill="#fff" stroke="#e0e0e0"/><text x="280" y="156">6</text>
+                <rect x="362" y="140" width="80" height="60" fill="#fff" stroke="#e0e0e0"/><text x="368" y="156">7</text>
+                <rect x="450" y="140" width="80" height="60" fill="#fff" stroke="#e0e0e0"/><text x="456" y="156">8</text>
+                <rect x="538" y="140" width="80" height="60" fill="#fff" stroke="#e0e0e0"/><text x="544" y="156">9</text>
+            </g>
+            <g font-family="Arial" font-size="11" fill="#7f8c8d">
+                <rect x="10" y="215" width="14" height="14" fill="#d5f2e3" stroke="#27ae60"/><text x="30" y="226">Giorno con evento</text>
+                <rect x="160" y="215" width="14" height="14" fill="#fff" stroke="#3498db" stroke-width="2"/><text x="180" y="226">Oggi</text>
+                <rect x="240" y="215" width="14" height="14" fill="#f5f5f5" stroke="#e0e0e0"/><text x="260" y="226">Data passata</text>
+            </g>
+            <rect x="10" y="245" width="608" height="34" rx="6" fill="#3498db"/>
+            <text x="30" y="267" fill="#fff" font-family="Arial" font-size="13">Prenota</text>
+        </svg>
+        <div style="font-size:0.8em; color:#999; font-style:italic; margin-top:6px;">Illustrazione schematica del calendario (non uno screenshot reale)</div>
+    </div>
 </div>
 
 <div class="section" id="utente-prenotazione">
@@ -585,7 +627,70 @@
     <div class="alert alert-info">
         <strong>Evento non più disponibile?</strong> Se apri un link di prenotazione salvato in precedenza e l'evento è stato nel frattempo annullato (perché rimosso dal calendario Google di origine), vedrai un messaggio che te lo segnala e verrai riportato al calendario.
     </div>
-    <div class="screenshot">[Screenshot: Layout sala con posti colorati, fila A, B, C... e colonne numerate]</div>
+    <div class="screenshot" style="background:#fff; border-style:solid; padding:15px;">
+        <svg viewBox="0 0 640 320" xmlns="http://www.w3.org/2000/svg" style="width:100%; max-width:560px; height:auto;">
+            <rect x="0" y="0" width="640" height="320" fill="#fff"/>
+            <text x="20" y="24" font-family="Arial" font-size="15" font-weight="bold" fill="#2c3e50">Sala Grande — Concerto di Agosto</text>
+            <text x="20" y="42" font-family="Arial" font-size="11" fill="#7f8c8d">🎭 palco / schermo</text>
+            <rect x="20" y="48" width="600" height="10" rx="4" fill="#2c3e50"/>
+            <g font-family="Arial" font-size="11">
+            <!-- fila A -->
+            <text x="10" y="86" fill="#7f8c8d">A</text>
+            <rect x="30" y="72" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="60" y="72" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="90" y="72" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="140" y="72" width="26" height="26" fill="#3498db"/>
+            <rect x="170" y="72" width="26" height="26" fill="#3498db"/>
+            <rect x="200" y="72" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="250" y="72" width="26" height="26" fill="#e67e22"/>
+            <rect x="280" y="72" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="310" y="72" width="26" height="26" fill="#fff" stroke="#999"/>
+            <!-- fila B -->
+            <text x="10" y="120" fill="#7f8c8d">B</text>
+            <rect x="30" y="106" width="26" height="26" fill="#1abc9c"/>
+            <rect x="60" y="106" width="26" height="26" fill="#1abc9c"/>
+            <rect x="90" y="106" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="140" y="106" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="170" y="106" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="200" y="106" width="26" height="26" fill="#8b5cf6"/>
+            <rect x="250" y="106" width="26" height="26" fill="#8b5cf6"/>
+            <rect x="280" y="106" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="310" y="106" width="26" height="26" fill="#fff" stroke="#999"/>
+            <!-- fila C -->
+            <text x="10" y="154" fill="#7f8c8d">C</text>
+            <rect x="30" y="140" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="60" y="140" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="90" y="140" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="140" y="140" width="26" height="26" fill="#3498db"/>
+            <rect x="170" y="140" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="200" y="140" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="250" y="140" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="280" y="140" width="26" height="26" fill="#fff" stroke="#999"/>
+            <rect x="310" y="140" width="26" height="26" fill="#fff" stroke="#999"/>
+            <text x="7" y="30" fill="#ccc">.</text>
+            <text x="120" y="90" fill="#ccc" font-size="18">┊</text>
+            <text x="230" y="90" fill="#ccc" font-size="18">┊</text>
+            <text x="120" y="124" fill="#ccc" font-size="18">┊</text>
+            <text x="230" y="124" fill="#ccc" font-size="18">┊</text>
+            <text x="120" y="158" fill="#ccc" font-size="18">┊</text>
+            <text x="230" y="158" fill="#ccc" font-size="18">┊</text>
+            <text x="1" y="90">1</text><text x="30" y="65" font-size="10">1</text><text x="60" y="65" font-size="10">2</text><text x="90" y="65" font-size="10">3</text>
+            <text x="140" y="65" font-size="10">4</text><text x="170" y="65" font-size="10">5</text><text x="200" y="65" font-size="10">6</text>
+            <text x="250" y="65" font-size="10">7</text><text x="280" y="65" font-size="10">8</text><text x="310" y="65" font-size="10">9</text>
+            </g>
+            <!-- legenda -->
+            <g font-family="Arial" font-size="11">
+                <rect x="30" y="200" width="16" height="16" fill="#fff" stroke="#999"/><text x="52" y="212">Libero</text>
+                <rect x="130" y="200" width="16" height="16" fill="#e67e22"/><text x="152" y="212">Riservato</text>
+                <rect x="240" y="200" width="16" height="16" fill="#3498db"/><text x="262" y="212">Prenotato</text>
+                <rect x="350" y="200" width="16" height="16" fill="#1abc9c"/><text x="372" y="212">In selezione</text>
+                <rect x="470" y="200" width="16" height="16" fill="#8b5cf6"/><text x="492" y="212">Abbonato</text>
+            </g>
+            <rect x="30" y="235" width="150" height="34" rx="6" fill="#27ae60"/>
+            <text x="52" y="257" fill="#fff" font-family="Arial" font-size="13">Conferma Prenotazione</text>
+        </svg>
+        <div style="font-size:0.8em; color:#999; font-style:italic; margin-top:6px;">Illustrazione schematica della mappa posti (non uno screenshot reale)</div>
+    </div>
 </div>
 
 <div class="section" id="utente-visualizza">
@@ -916,7 +1021,54 @@ source venv/bin/activate    (Linux/Mac)</pre>
             <p>Nome Evento, Descrizione (opzionale), Data (precompilata se arrivi dal calendario), Ora Inizio, Durata. Clicca <strong>Crea Evento</strong> — i posti verranno generati automaticamente con file A, B, C... e colonne numerate.</p>
         </div>
     </div>
-    <div class="screenshot">[Screenshot: Modulo creazione evento]</div>
+    <div class="screenshot" style="background:#fff; border-style:solid; padding:15px;">
+        <svg viewBox="0 0 640 400" xmlns="http://www.w3.org/2000/svg" style="width:100%; max-width:520px; height:auto;">
+            <rect x="0" y="0" width="640" height="400" fill="#fff"/>
+            <text x="20" y="26" font-family="Arial" font-size="16" font-weight="bold" fill="#2c3e50">Crea Evento</text>
+            <g font-family="Arial" font-size="12" fill="#555">
+                <text x="20" y="54">Sala</text>
+                <rect x="20" y="60" width="280" height="30" rx="4" fill="#f5f5f5" stroke="#e0e0e0"/>
+                <text x="30" y="80">Sala Grande ▾</text>
+
+                <text x="320" y="54">Genere Evento</text>
+                <rect x="320" y="60" width="280" height="30" rx="4" fill="#f5f5f5" stroke="#e0e0e0"/>
+                <text x="330" y="80">Concerto ▾</text>
+
+                <text x="20" y="108">Layout Posti</text>
+                <rect x="20" y="114" width="280" height="30" rx="4" fill="#f5f5f5" stroke="#e0e0e0"/>
+                <text x="30" y="134">Platea intera (default) ▾</text>
+
+                <text x="320" y="108">oppure</text>
+                <rect x="320" y="114" width="280" height="30" rx="4" fill="#fff" stroke="#e0e0e0" stroke-dasharray="3,2"/>
+                <text x="330" y="134" fill="#999">Layout personalizzato</text>
+
+                <text x="20" y="162">Nome Evento</text>
+                <rect x="20" y="168" width="580" height="30" rx="4" fill="#f5f5f5" stroke="#e0e0e0"/>
+                <text x="30" y="188">Concerto d'Estate</text>
+
+                <text x="20" y="216">Descrizione (opzionale)</text>
+                <rect x="20" y="222" width="580" height="30" rx="4" fill="#f5f5f5" stroke="#e0e0e0"/>
+
+                <text x="20" y="270">Data</text>
+                <rect x="20" y="276" width="180" height="30" rx="4" fill="#f5f5f5" stroke="#e0e0e0"/>
+                <text x="30" y="296">01/09/2026</text>
+
+                <text x="220" y="270">Ora Inizio</text>
+                <rect x="220" y="276" width="180" height="30" rx="4" fill="#f5f5f5" stroke="#e0e0e0"/>
+                <text x="230" y="296">21:00</text>
+
+                <text x="420" y="270">Durata (min)</text>
+                <rect x="420" y="276" width="180" height="30" rx="4" fill="#f5f5f5" stroke="#e0e0e0"/>
+                <text x="430" y="296">120</text>
+
+                <rect x="20" y="316" width="16" height="16" fill="#fff" stroke="#999"/>
+                <text x="42" y="329">Abilita overbooking per questo evento</text>
+            </g>
+            <rect x="20" y="350" width="150" height="36" rx="6" fill="#27ae60"/>
+            <text x="45" y="373" fill="#fff" font-family="Arial" font-size="13">Crea Evento</text>
+        </svg>
+        <div style="font-size:0.8em; color:#999; font-style:italic; margin-top:6px;">Illustrazione schematica del modulo di creazione evento (non uno screenshot reale)</div>
+    </div>
 </div>
 
 <div class="section" id="admin-modifica-layout">
@@ -1033,7 +1185,46 @@ source venv/bin/activate    (Linux/Mac)</pre>
             <p>Clicca <strong>Reset</strong> per tornare alla visualizzazione completa.</p>
         </div>
     </div>
-    <div class="screenshot">[Screenshot: Pagina admin con barra di ricerca]</div>
+    <div class="screenshot" style="background:#fff; border-style:solid; padding:15px;">
+        <svg viewBox="0 0 640 300" xmlns="http://www.w3.org/2000/svg" style="width:100%; max-width:560px; height:auto;">
+            <rect x="0" y="0" width="640" height="300" fill="#fff"/>
+            <text x="20" y="26" font-family="Arial" font-size="15" font-weight="bold" fill="#2c3e50">Ricerca Prenotazioni</text>
+            <rect x="20" y="40" width="360" height="30" rx="4" fill="#f5f5f5" stroke="#e0e0e0"/>
+            <text x="30" y="60" font-family="Arial" font-size="12" fill="#999">Cerca per nome, email, posto...</text>
+            <rect x="390" y="40" width="90" height="30" rx="6" fill="#3498db"/>
+            <text x="415" y="60" fill="#fff" font-family="Arial" font-size="12">Cerca</text>
+            <rect x="490" y="40" width="90" height="30" rx="6" fill="#e0e0e0"/>
+            <text x="515" y="60" fill="#555" font-family="Arial" font-size="12">Reset</text>
+
+            <g font-family="Arial" font-size="11">
+                <rect x="20" y="86" width="600" height="28" fill="#2c3e50"/>
+                <text x="30" y="105" fill="#fff">Nome</text>
+                <text x="200" y="105" fill="#fff">Evento</text>
+                <text x="360" y="105" fill="#fff">Posti</text>
+                <text x="480" y="105" fill="#fff">Sala</text>
+
+                <rect x="20" y="114" width="600" height="28" fill="#fff" stroke="#f0f0f0"/>
+                <text x="30" y="133" fill="#333">Mario Rossi</text>
+                <text x="200" y="133" fill="#333">Concerto d'Estate</text>
+                <text x="360" y="133" fill="#333">A1, A2</text>
+                <text x="480" y="133" fill="#333">Sala Grande</text>
+
+                <rect x="20" y="142" width="600" height="28" fill="#f9f9f9" stroke="#f0f0f0"/>
+                <text x="30" y="161" fill="#333">Luisa Bianchi</text>
+                <text x="200" y="161" fill="#333">Teatro di Settembre</text>
+                <text x="360" y="161" fill="#333">B3</text>
+                <text x="480" y="161" fill="#333">Sala Piccola</text>
+
+                <rect x="20" y="170" width="600" height="28" fill="#fff" stroke="#f0f0f0"/>
+                <text x="30" y="189" fill="#333">Giulia Verdi</text>
+                <text x="200" y="189" fill="#333">Concerto d'Estate</text>
+                <text x="360" y="189" fill="#333">C5, C6, C7</text>
+                <text x="480" y="189" fill="#333">Sala Grande</text>
+            </g>
+            <text x="20" y="220" font-family="Arial" font-size="11" fill="#7f8c8d">Filtro applicato in tempo reale mentre digiti</text>
+        </svg>
+        <div style="font-size:0.8em; color:#999; font-style:italic; margin-top:6px;">Illustrazione schematica della ricerca prenotazioni (non uno screenshot reale)</div>
+    </div>
 </div>
 
 <div class="section" id="admin-abbonato">
