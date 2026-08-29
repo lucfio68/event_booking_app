@@ -41,6 +41,29 @@ class Sala(db.Model):
     eventi = db.relationship('Evento', backref='sala', lazy=True, cascade='all, delete-orphan')
     posti = db.relationship('Posto', backref='sala', lazy=True, cascade='all, delete-orphan')
 
+class Gestore(db.Model):
+    """
+    Fase C - Step 1: anagrafica dell'organizzatore/gestore di eventi.
+    Ogni Genere Evento (Fase C - Step 2) apparterrà a un Gestore, e ogni Sala
+    potrà avere un Gestore di default (Fase C - Step 3).
+    """
+    __tablename__ = 'gestore'
+    id = db.Column(db.Integer, primary_key=True)
+    ragione_sociale = db.Column(db.String(150), nullable=False)
+    indirizzo = db.Column(db.String(255), nullable=True)
+    cf_piva = db.Column(db.String(50), nullable=True)
+    cellulare = db.Column(db.String(20), nullable=True)
+    email = db.Column(db.String(120), nullable=True)
+    pec = db.Column(db.String(120), nullable=True)
+    # Testo libero: numeri di registrazione, certificazioni ecc. da poter riportare
+    # in email/schermate (non una lista strutturata)
+    certificazioni = db.Column(db.Text, nullable=True)
+    logo = db.Column(db.LargeBinary, nullable=True)
+    logo_mimetype = db.Column(db.String(50), nullable=True)
+    creato_da = db.Column(db.Integer, db.ForeignKey('utente.id'), nullable=True)
+    data_creazione = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 class GenereEvento(db.Model):
     __tablename__ = 'genere_evento'
     id = db.Column(db.Integer, primary_key=True)

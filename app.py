@@ -3,7 +3,7 @@ import re
 import threading
 import socket
 from datetime import datetime, date, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, session
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, session, Response
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_mail import Mail, Message
 from flask_limiter import Limiter
@@ -11,7 +11,7 @@ from flask_limiter.util import get_remote_address
 from sqlalchemy import func, or_, text, inspect
 from sqlalchemy.orm import joinedload
 from itsdangerous import URLSafeTimedSerializer
-from models import db, Utente, Sala, Evento, Prenotazione, Posto, GenereEvento, LayoutPosti, GoogleConnessione, CalendarioGoogle
+from models import db, Utente, Sala, Evento, Prenotazione, Posto, GenereEvento, LayoutPosti, GoogleConnessione, CalendarioGoogle, Gestore
 from config import Config
 
 # Fase B - Google Calendar
@@ -1839,6 +1839,143 @@ def _imposta_layout_default(layout):
     for altro in altri:
         altro.is_default = False
     layout.is_default = True
+
+
+# ==================== FASE C - STEP 1: GESTIONE GESTORI (ANAGRAFICA + LOGO) ====================
+#
+# Anagrafica dell'organizzatore/gestore di eventi. Il logo viene salvato come
+# blob nel database (non su filesystem, che su Render è effimero) e servito
+# tramite una route dedicata. Nessun collegamento ancora a Sala/GenereEvento
+# in questo step (arriva negli step successivi della Fase C).
+
+LOGO_MAX_BYTES = 2 * 1024 * 1024  # 2 MB
+LOGO_MIMETYPES_AMMESSI = {'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'}
+
+
+def _salva_logo_da_form(oggetto, campo_file='logo', campo_rimuovi='rimuovi_logo'):
+    """Applica l'eventuale upload/rimozione del logo su un oggetto che ha i
+    campi .logo e .logo_mimetype (Gestore, e in futuro GenereEvento). Ritorna
+    un messaggio di errore (str) oppure None se tutto ok."""
+    if request.form.get(campo_rimuovi) == 'on':
+        oggetto.logo = None
+        oggetto.logo_mimetype = None
+        return None
+
+    file = request.files.get(campo_file)
+    if file and file.filename:
+        dati = file.read()
+        if len(dati) > LOGO_MAX_BYTES:
+            return f'Il file "{file.filename}" supera i {LOGO_MAX_BYTES // (1024*1024)} MB consentiti.'
+        mimetype = file.mimetype or ''
+        if mimetype not in LOGO_MIMETYPES_AMMESSI:
+            return f'Formato "{mimetype}" non supportato. Usa PNG, JPG, GIF, WEBP o SVG.'
+        oggetto.logo = dati
+        oggetto.logo_mimetype = mimetype
+    return None
+
+
+@app.route('/gestore/<int:gestore_id>/logo')
+def logo_gestore(gestore_id):
+    gestore = db.session.get(Gestore, gestore_id)
+    if not gestore or not gestore.logo:
+        abort(404)
+    return Response(gestore.logo, mimetype=gestore.logo_mimetype or 'application/octet-stream')
+
+
+@app.route('/admin/gestori')
+@login_required
+def admin_gestori():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
+    modifica_id = request.args.get('modifica', type=int)
+    gestore_da_modificare = db.session.get(Gestore, modifica_id) if modifica_id else None
+
+    return render_template('admin_gestori.html', gestori=gestori, gestore_da_modificare=gestore_da_modificare)
+
+
+@app.route('/admin/gestori/add', methods=['POST'])
+@login_required
+def admin_gestori_add():
+    if not current_user.is_admin():
+        abort(403)
+
+    ragione_sociale = (request.form.get('ragione_sociale') or '').strip()
+    if not ragione_sociale:
+        flash('La ragione sociale è obbligatoria.', 'danger')
+        return redirect(url_for('admin_gestori'))
+
+    gestore = Gestore(
+        ragione_sociale=ragione_sociale,
+        indirizzo=(request.form.get('indirizzo') or '').strip() or None,
+        cf_piva=(request.form.get('cf_piva') or '').strip() or None,
+        cellulare=(request.form.get('cellulare') or '').strip() or None,
+        email=(request.form.get('email') or '').strip() or None,
+        pec=(request.form.get('pec') or '').strip() or None,
+        certificazioni=(request.form.get('certificazioni') or '').strip() or None,
+        creato_da=current_user.id,
+    )
+
+    errore = _salva_logo_da_form(gestore)
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_gestori'))
+
+    db.session.add(gestore)
+    db.session.commit()
+    flash(f'Gestore "{gestore.ragione_sociale}" creato.', 'success')
+    return redirect(url_for('admin_gestori'))
+
+
+@app.route('/admin/gestori/<int:gestore_id>/edit', methods=['POST'])
+@login_required
+def admin_gestori_edit(gestore_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    gestore = db.session.get(Gestore, gestore_id)
+    if not gestore:
+        abort(404)
+
+    ragione_sociale = (request.form.get('ragione_sociale') or '').strip()
+    if not ragione_sociale:
+        flash('La ragione sociale è obbligatoria.', 'danger')
+        return redirect(url_for('admin_gestori', modifica=gestore_id))
+
+    gestore.ragione_sociale = ragione_sociale
+    gestore.indirizzo = (request.form.get('indirizzo') or '').strip() or None
+    gestore.cf_piva = (request.form.get('cf_piva') or '').strip() or None
+    gestore.cellulare = (request.form.get('cellulare') or '').strip() or None
+    gestore.email = (request.form.get('email') or '').strip() or None
+    gestore.pec = (request.form.get('pec') or '').strip() or None
+    gestore.certificazioni = (request.form.get('certificazioni') or '').strip() or None
+
+    errore = _salva_logo_da_form(gestore)
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_gestori', modifica=gestore_id))
+
+    db.session.commit()
+    flash(f'Gestore "{gestore.ragione_sociale}" aggiornato.', 'success')
+    return redirect(url_for('admin_gestori'))
+
+
+@app.route('/admin/gestori/<int:gestore_id>/delete', methods=['POST'])
+@login_required
+def admin_gestori_delete(gestore_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    gestore = db.session.get(Gestore, gestore_id)
+    if not gestore:
+        abort(404)
+
+    db.session.delete(gestore)
+    db.session.commit()
+    flash('Gestore eliminato.', 'success')
+    return redirect(url_for('admin_gestori'))
 
 
 # ==================== GESTIONE SALE ====================
