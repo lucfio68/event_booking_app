@@ -30,6 +30,23 @@ Repo: https://github.com/lucfio68/event_booking_app
 
 **Fase B considerata chiusa** salvo emergano errori durante il test conclusivo di Step 1-3 già consegnati.
 
+**Fase C — Gestore Evento e Generi per Gestore: 🔶 IN ANALISI**
+- **Step 1 — Tabella Gestore (anagrafica + logo) e CRUD: ⬜ DA FARE**
+- **Step 2 — GenereEvento aggiornato (gestore_id, logo, descrizione aggiuntiva) e CRUD: ⬜ DA FARE**
+- **Step 3 — Sala con Gestore di default: ⬜ DA FARE**
+- **Step 4 — Creazione evento a cascata (Sala → Gestore → Genere filtrato con logo): ⬜ DA FARE**
+- **Step 5 — Import Google Calendar con campo Gestore: ⬜ DA FARE**
+
+Dettaglio di ciascuno step, decisioni e punti aperti nella sezione dedicata più sotto.
+
+**Fase D — Stampe e Check-in con QR Code: 🔶 IN ANALISI** (rinominata da Fase C il 28 agosto 2026, ora in coda alla Fase C sul Gestore Evento)
+- **Step 1 — Generazione PDF A3 (mappa posti + elenco prenotazioni): ⬜ DA FARE**
+- **Step 2 — QR code sul biglietto (token firmato, invio con l'email di conferma): ⬜ DA FARE**
+- **Step 3 — Pagina di check-in per admin da telefono: ⬜ DA FARE**
+- **Step 4 — Totem con lettore QR fisico all'ingresso: ⬜ DA FARE**
+
+Dettaglio di ciascuno step, decisioni e punti aperti nella sezione dedicata più sotto.
+
 ### Decisioni già prese per la Fase B (da rispettare, non da rimettere in discussione)
 
 - **Import**: pilotato manualmente dall'admin con un tasto "Crea eventi da calendario" — **nessuno** scheduler/cron/webhook/sync automatico
@@ -52,9 +69,33 @@ Repo: https://github.com/lucfio68/event_booking_app
 
 Procedere **uno step alla volta**, con un test di conferma dopo ogni step prima di passare al successivo — è l'approccio seguito per tutta la Fase A e la Fase B e ha funzionato bene per individuare rapidamente eventuali problemi.
 
-## Fase C — Stampe e Check-in con QR Code (in analisi, non ancora iniziata)
+## Fase C — Gestore Evento e Generi per Gestore (dettaglio)
 
-Richiesta del 28 agosto 2026, da analizzare a step come le fasi precedenti prima di scrivere codice.
+Vedi stato di avanzamento per step nella sezione "Stato del progetto" più sopra. Richiesta del 28 agosto 2026 (nata come "Step 0" della fase Stampe/QR, poi promossa a fase propria perché tocca lo schema dati portante e precede logicamente tutto il resto).
+
+**Obiettivo**: ogni evento deve poter essere ricondotto a un **Gestore** (l'organizzatore, con la sua anagrafica) e a un **Genere Evento** di proprietà di quel Gestore (con logo e descrizione aggiuntiva) — dati che compariranno nelle schermate di Gestione Evento e, più avanti, sui biglietti (Fase D).
+
+### Decisioni già prese (da rispettare, non da rimettere in discussione)
+
+- **Nuova tabella `Gestore`**: ragione sociale, indirizzo, CF/P.IVA, cellulare, email, PEC, certificazioni, **logo** (blob nel DB)
+- **`GenereEvento.gestore_id`**: nullable. I generi esistenti dalla Fase A restano con gestore vuoto e continuano a essere utilizzabili: se una sala non ha un Gestore di default, il menu Genere in creazione evento mostra proprio quelli senza gestore
+- **`GenereEvento` guadagna**: `logo` (blob nel DB) e `descrizione_aggiuntiva`
+- **Loghi (sia `Gestore.logo` che `GenereEvento.logo`)**: salvati come blob nel database Postgres/Neon, non come URL esterni — da progettare: colonna binaria + content-type, route dedicata per servirli (es. `/gestore/<id>/logo`), limite dimensione ragionevole in upload
+- **`Sala.gestore_default_id`**: nullable, facoltativo
+- **Creazione evento**: il Gestore della sala (se presente) è precompilato ma **sempre cambiabile** con qualunque altro Gestore esistente; cambiando Gestore si rifiltra la lista Generi disponibili (con relativo logo in anteprima)
+- **Import Google Calendar (Fase B, Step 3 già consegnato) — retrofit**: il form di import guadagna un campo **Gestore** da dichiarare prima della ricerca eventi (insieme a calendario sorgente e range giorni); una volta scelto, ogni riga dell'anteprima potrà avere un **Genere** assegnato (filtrato su quel Gestore), campo facoltativo, lasciabile vuoto
+
+### Step
+
+- **Step 1 — Tabella Gestore + CRUD e logo**: nuovo modello, pagina admin di gestione (elenco, crea/modifica/elimina), upload e visualizzazione logo
+- **Step 2 — GenereEvento aggiornato + CRUD**: aggiunta `gestore_id`/`logo`/`descrizione_aggiuntiva` alla tabella esistente (richiede migrazione, tabella già popolata dalla Fase A), aggiornamento della UI di gestione generi esistente per includere questi campi
+- **Step 3 — Sala con Gestore di default**: nuova colonna su `Sala`, UI di associazione (probabilmente integrata nella UI esistente di gestione sale)
+- **Step 4 — Creazione evento a cascata**: form di creazione evento aggiornato con la selezione Sala → Gestore (precompilato/cambiabile) → Genere (filtrato, con logo) → Layout, richiede JS per l'aggiornamento dinamico delle opzioni
+- **Step 5 — Import Google Calendar con campo Gestore**: aggiornamento del form e della route di import già consegnati in Fase B, per aggiungere il campo Gestore e la selezione Genere per riga
+
+## Fase D — Stampe e Check-in con QR Code (dettaglio)
+
+Vedi stato di avanzamento per step nella sezione "Stato del progetto" più sopra. Richiesta del 28 agosto 2026, da analizzare a step come le fasi precedenti prima di scrivere codice — un punto alla volta, con test di conferma prima di passare al successivo. (Numerata come Fase D dal 28 agosto 2026: la Fase C è ora dedicata al Gestore Evento, propedeutica a questa.)
 
 **Obiettivo 1 — Stampa A3 mappa posti + elenco prenotazioni**
 Un admin deve poter generare un PDF formato A3 con la situazione dei posti prenotati e l'elenco delle prenotazioni di un evento, da usare all'ingresso per indirizzare le persone al proprio posto al momento dell'acquisto/ritiro biglietto.
@@ -144,7 +185,7 @@ https://raw.githubusercontent.com/lucfio68/event_booking_app/main/app.py
 
 ## Changelog Fase B (versioning delle modifiche)
 
-- **28 agosto 2026** — Fase B chiusa: Step 4 (Export) congelato su decisione dell'utente, non necessario. Aperta l'analisi della Fase C (Stampe A3 + Check-in QR Code).
+- **28 agosto 2026** — Fase B chiusa: Step 4 (Export) congelato su decisione dell'utente, non necessario. Aperta l'analisi della Fase C (Gestore Evento e Generi per Gestore) e della Fase D (Stampe A3 + Check-in QR Code, rinominata da Fase C).
 - **v1.3.0 (26 agosto 2026)** — Step 3: import manuale con anteprima/diff. Nuove colonne su `Evento` (`origine`, `google_event_id`, `google_calendar_id_origine`, `google_updated`, `cancellato_google`), nuova route di migrazione `/admin/migrate-google-import`, nuovo template `admin_google_import.html`, filtro `cancellato_google` su `/api/events` e blocco prenotazione su eventi annullati in `booking_page`.
 - **v1.2.0 (26 agosto 2026)** — Step 2: associazione Sala ↔ Calendario (`CalendarioGoogle`, route `/admin/google/sale*`, template `admin_google_sale.html`).
 - **v1.1.0 (data non specificata, dichiarato completato e testato dall'utente)** — Step 1: connessione OAuth Google (`GoogleConnessione`, route `/admin/google*`, template `admin_google.html`).
