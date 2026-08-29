@@ -310,6 +310,7 @@
         <li><a href="#utente-calendario">2.3 Il Calendario Eventi</a></li>
         <li><a href="#utente-prenotazione">2.4 Prenotare un Posto</a></li>
         <li><a href="#utente-visualizza">2.5 Visualizzare Eventi</a></li>
+        <li><a href="#utente-le-mie-prenotazioni">2.6 Le mie prenotazioni</a></li>
         {% if current_user.is_admin() %}
         <li><a href="#admin">3. Guida Amministratore</a></li>
         <li><a href="#admin-installazione">3.1 Installazione e Configurazione</a></li>
@@ -710,6 +711,32 @@
         <li>Orario di inizio</li>
         <li>Nome della sala tra parentesi</li>
     </ul>
+</div>
+
+<div class="section" id="utente-le-mie-prenotazioni">
+    <h2><span class="badge badge-user">Utente</span> 2.6 Le mie prenotazioni</h2>
+    <p>Una pagina personale che raccoglie tutte le prenotazioni fatte con il tuo account, come una sorta di "portafoglio" biglietti.</p>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Apri "Le mie prenotazioni"</h4>
+            <p>Clicca <strong>🎟️ Le mie prenotazioni</strong> nel menu in alto, visibile dopo il login.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Consulta l'elenco</h4>
+            <p>Le prenotazioni sono divise in due gruppi:</p>
+            <ul>
+                <li><strong>Prossime</strong>: eventi non ancora passati, con evento, data, ora, sala, i posti prenotati (es. "A1, A2") e lo stato della prenotazione</li>
+                <li><strong>Passate</strong>: eventi già conclusi, mostrate in grigio come semplice storico</li>
+            </ul>
+        </div>
+    </div>
+    <div class="alert alert-info">
+        <strong>Evento annullato:</strong> se una prenotazione riguarda un evento nel frattempo annullato (perché l'organizzatore lo ha rimosso dal calendario Google collegato — vedi <a href="#utente-calendario">2.3</a>), comparirà l'etichetta <strong>Evento annullato</strong> accanto al nome: la prenotazione resta visibile per tua memoria, ma l'evento non è più attivo.
+    </div>
 </div>
 
 {% if current_user.is_admin() %}
@@ -1744,6 +1771,11 @@ source venv/bin/activate    (Linux/Mac)</pre>
 {% if current_user.is_admin() %}
 <div class="section" id="changelog">
     <h2>📝 6. Changelog</h2>
+
+    <h3>v1.9 (2026)</h3>
+    <ul>
+        <li><strong>Nuovo:</strong> pagina "Le mie prenotazioni" (sezione 2.6) — elenco personale delle prenotazioni dell'utente, divise in prossime/passate, accessibile dal menu in alto a tutti gli utenti loggati</li>
+    </ul>
 
     <h3>v1.8 (2026)</h3>
     <ul>
