@@ -1627,7 +1627,10 @@ def admin_generi():
         return redirect(url_for('calendar_view'))
 
     generi = GenereEvento.query.order_by(GenereEvento.nome).all()
-    return render_template('admin_generi.html', generi=generi)
+    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
+    modifica_id = request.args.get('modifica', type=int)
+    genere_da_modificare = db.session.get(GenereEvento, modifica_id) if modifica_id else None
+    return render_template('admin_generi.html', generi=generi, gestori=gestori, genere_da_modificare=genere_da_modificare)
 
 
 @app.route('/admin/generi/add', methods=['POST'])
@@ -1638,19 +1641,75 @@ def admin_generi_add():
 
     nome = request.form.get('nome', '').strip()
     descrizione = request.form.get('descrizione', '').strip()
+    descrizione_aggiuntiva = request.form.get('descrizione_aggiuntiva', '').strip()
+    gestore_id = request.form.get('gestore_id', type=int) or None
 
     if not nome:
         flash('Il nome del genere è obbligatorio.', 'danger')
         return redirect(url_for('admin_generi'))
 
-    if GenereEvento.query.filter(func.lower(GenereEvento.nome) == nome.lower()).first():
-        flash(f"Esiste già un genere chiamato '{nome}'.", 'danger')
+    if GenereEvento.query.filter(
+        func.lower(GenereEvento.nome) == nome.lower(),
+        GenereEvento.gestore_id == gestore_id
+    ).first():
+        flash(f"Esiste già un genere chiamato '{nome}' per questo gestore.", 'danger')
         return redirect(url_for('admin_generi'))
 
-    genere = GenereEvento(nome=nome, descrizione=descrizione or None)
+    genere = GenereEvento(
+        nome=nome, descrizione=descrizione or None,
+        descrizione_aggiuntiva=descrizione_aggiuntiva or None,
+        gestore_id=gestore_id,
+    )
+
+    errore = _salva_logo_da_form(genere)
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_generi'))
+
     db.session.add(genere)
     db.session.commit()
     flash(f"Genere '{nome}' creato.", 'success')
+    return redirect(url_for('admin_generi'))
+
+
+@app.route('/admin/generi/<int:genere_id>/edit', methods=['POST'])
+@login_required
+def admin_generi_edit(genere_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    genere = db.session.get(GenereEvento, genere_id)
+    if not genere:
+        abort(404)
+
+    nome = request.form.get('nome', '').strip()
+    if not nome:
+        flash('Il nome del genere è obbligatorio.', 'danger')
+        return redirect(url_for('admin_generi', modifica=genere_id))
+
+    gestore_id = request.form.get('gestore_id', type=int) or None
+
+    duplicato = GenereEvento.query.filter(
+        func.lower(GenereEvento.nome) == nome.lower(),
+        GenereEvento.gestore_id == gestore_id,
+        GenereEvento.id != genere_id
+    ).first()
+    if duplicato:
+        flash(f"Esiste già un genere chiamato '{nome}' per questo gestore.", 'danger')
+        return redirect(url_for('admin_generi', modifica=genere_id))
+
+    genere.nome = nome
+    genere.descrizione = request.form.get('descrizione', '').strip() or None
+    genere.descrizione_aggiuntiva = request.form.get('descrizione_aggiuntiva', '').strip() or None
+    genere.gestore_id = gestore_id
+
+    errore = _salva_logo_da_form(genere)
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_generi', modifica=genere_id))
+
+    db.session.commit()
+    flash(f"Genere '{nome}' aggiornato.", 'success')
     return redirect(url_for('admin_generi'))
 
 
@@ -1669,6 +1728,14 @@ def admin_generi_delete(genere_id):
         flash(
             f"Impossibile eliminare '{genere.nome}': è collegato a {layout_collegati} layout esistenti. "
             f"Scollega prima quei layout.",
+            'danger'
+        )
+        return redirect(url_for('admin_generi'))
+
+    eventi_collegati = Evento.query.filter_by(genere_evento_id=genere_id).count()
+    if eventi_collegati > 0:
+        flash(
+            f"Impossibile eliminare '{genere.nome}': è collegato a {eventi_collegati} eventi esistenti.",
             'danger'
         )
         return redirect(url_for('admin_generi'))
@@ -1880,6 +1947,14 @@ def logo_gestore(gestore_id):
     if not gestore or not gestore.logo:
         abort(404)
     return Response(gestore.logo, mimetype=gestore.logo_mimetype or 'application/octet-stream')
+
+
+@app.route('/genere/<int:genere_id>/logo')
+def logo_genere(genere_id):
+    genere = db.session.get(GenereEvento, genere_id)
+    if not genere or not genere.logo:
+        abort(404)
+    return Response(genere.logo, mimetype=genere.logo_mimetype or 'application/octet-stream')
 
 
 @app.route('/admin/gestori')
@@ -2270,9 +2345,52 @@ def migrate_google_import():
             db.session.execute(text(
                 "CREATE INDEX ix_evento_google_event_id ON evento (google_event_id)"
             ))
-            aggiunte.append('indice ix_evento_google_event_id')
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+# ==================== MIGRAZIONE GENERI EVENTO / GESTORE (Fase C, Step 2) ====================
+# Aggiunge le colonne di collegamento a Gestore + logo su 'genere_evento'
+# (tabella già esistente e popolata dalla Fase A: db.create_all() non basta).
+
+@app.route('/admin/migrate-generi-gestore')
+@login_required
+def migrate_generi_gestore():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    esiti, aggiunte = [], []
+
+    try:
+        inspector = inspect(db.engine)
+        colonne_esistenti = [col['name'] for col in inspector.get_columns('genere_evento')]
+
+        colonne_da_aggiungere = [
+            ('gestore_id', "ALTER TABLE genere_evento ADD COLUMN gestore_id INTEGER REFERENCES gestore(id)"),
+            ('descrizione_aggiuntiva', "ALTER TABLE genere_evento ADD COLUMN descrizione_aggiuntiva TEXT"),
+            ('logo', "ALTER TABLE genere_evento ADD COLUMN logo BYTEA"),
+            ('logo_mimetype', "ALTER TABLE genere_evento ADD COLUMN logo_mimetype VARCHAR(50)"),
+        ]
+
+        for nome_colonna, ddl in colonne_da_aggiungere:
+            if nome_colonna not in colonne_esistenti:
+                db.session.execute(text(ddl))
+                aggiunte.append(f'genere_evento.{nome_colonna}')
+            else:
+                esiti.append(f"genere_evento.{nome_colonna} esiste già")
+
+        indici_esistenti = [idx['name'] for idx in inspector.get_indexes('genere_evento')]
+        if 'ix_genere_evento_gestore_id' not in indici_esistenti:
+            db.session.execute(text(
+                "CREATE INDEX ix_genere_evento_gestore_id ON genere_evento (gestore_id)"
+            ))
+            aggiunte.append('indice ix_genere_evento_gestore_id')
         else:
-            esiti.append("indice ix_evento_google_event_id esiste già")
+            esiti.append("indice ix_genere_evento_gestore_id esiste già")
 
         if aggiunte:
             db.session.commit()

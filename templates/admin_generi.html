@@ -3,22 +3,58 @@
 {% block content %}
 <div class="admin-container">
     <h2>🏷️ Gestione Generi Evento</h2>
-    <p class="text-muted">I generi (es. "Concerto", "Conferenza") ti permettono di avere layout posti diversi per tipologia di evento nella stessa sala.</p>
+    <p class="text-muted">I generi (es. "Concerto", "Conferenza") ti permettono di avere layout posti diversi per tipologia di evento nella stessa sala. Ogni genere può appartenere a un Gestore (facoltativo) e avere un proprio logo.</p>
 
     <div class="form-card" style="margin-top:20px;">
-        <h3>Nuovo Genere</h3>
-        <form method="POST" action="{{ url_for('admin_generi_add') }}">
+        <h3>{{ 'Modifica Genere "' ~ genere_da_modificare.nome ~ '"' if genere_da_modificare else 'Nuovo Genere' }}</h3>
+        <form method="POST" enctype="multipart/form-data"
+              action="{{ url_for('admin_generi_edit', genere_id=genere_da_modificare.id) if genere_da_modificare else url_for('admin_generi_add') }}">
             <div class="form-row">
                 <div class="form-group col-6">
-                    <label>Nome</label>
-                    <input type="text" name="nome" required class="form-control" placeholder="es. Concerto">
+                    <label>Nome *</label>
+                    <input type="text" name="nome" required class="form-control" placeholder="es. Concerto"
+                           value="{{ genere_da_modificare.nome if genere_da_modificare else '' }}">
                 </div>
                 <div class="form-group col-6">
-                    <label>Descrizione (opzionale)</label>
-                    <input type="text" name="descrizione" class="form-control" placeholder="es. Eventi musicali dal vivo">
+                    <label>Gestore <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(facoltativo)</span></label>
+                    <select name="gestore_id" class="form-control">
+                        <option value="">-- nessuno (genere generico) --</option>
+                        {% for g in gestori %}
+                        <option value="{{ g.id }}" {% if genere_da_modificare and genere_da_modificare.gestore_id == g.id %}selected{% endif %}>{{ g.ragione_sociale }}</option>
+                        {% endfor %}
+                    </select>
                 </div>
             </div>
-            <button type="submit" class="btn btn-primary">Aggiungi Genere</button>
+
+            <div class="form-group">
+                <label>Descrizione <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(interna, uso admin)</span></label>
+                <input type="text" name="descrizione" class="form-control" placeholder="es. Eventi musicali dal vivo"
+                       value="{{ genere_da_modificare.descrizione if genere_da_modificare else '' }}">
+            </div>
+
+            <div class="form-group">
+                <label>Descrizione aggiuntiva <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(potrà comparire lato utente/biglietto)</span></label>
+                <textarea name="descrizione_aggiuntiva" rows="2" class="form-control"
+                          placeholder="es. Testo da mostrare agli utenti per questo tipo di evento">{{ genere_da_modificare.descrizione_aggiuntiva if genere_da_modificare else '' }}</textarea>
+            </div>
+
+            <div class="form-group">
+                <label>Logo <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(facoltativo, max 2 MB — PNG/JPG/GIF/WEBP/SVG)</span></label>
+                {% if genere_da_modificare and genere_da_modificare.logo %}
+                <div style="margin-bottom:8px;">
+                    <img src="{{ url_for('logo_genere', genere_id=genere_da_modificare.id) }}" alt="Logo attuale" style="max-height:60px; max-width:200px; display:block; margin-bottom:6px;">
+                    <label style="font-weight:normal; font-size:0.9em;">
+                        <input type="checkbox" name="rimuovi_logo"> Rimuovi logo attuale
+                    </label>
+                </div>
+                {% endif %}
+                <input type="file" name="logo" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" class="form-control">
+            </div>
+
+            <button type="submit" class="btn btn-primary">{{ 'Salva Modifiche' if genere_da_modificare else 'Aggiungi Genere' }}</button>
+            {% if genere_da_modificare %}
+            <a href="{{ url_for('admin_generi') }}" class="btn btn-secondary">Annulla</a>
+            {% endif %}
         </form>
     </div>
 
@@ -28,7 +64,9 @@
         <table class="table">
             <thead>
                 <tr>
+                    <th>Logo</th>
                     <th>Nome</th>
+                    <th>Gestore</th>
                     <th>Descrizione</th>
                     <th>Azioni</th>
                 </tr>
@@ -36,9 +74,18 @@
             <tbody>
                 {% for g in generi %}
                 <tr>
-                    <td>{{ g.nome }}</td>
-                    <td>{{ g.descrizione or '-' }}</td>
                     <td>
+                        {% if g.logo %}
+                        <img src="{{ url_for('logo_genere', genere_id=g.id) }}" alt="Logo" style="max-height:32px; max-width:80px;">
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ g.nome }}</td>
+                    <td>{{ g.gestore.ragione_sociale if g.gestore else '-' }}</td>
+                    <td>{{ g.descrizione or '-' }}</td>
+                    <td style="display:flex; gap:6px;">
+                        <a href="{{ url_for('admin_generi', modifica=g.id) }}" class="btn btn-sm btn-secondary">Modifica</a>
                         <form method="POST" action="{{ url_for('admin_generi_delete', genere_id=g.id) }}" style="display:inline;" onsubmit="return confirm('Eliminare il genere &quot;{{ g.nome }}&quot;?');">
                             <button type="submit" class="btn btn-sm btn-danger">Elimina</button>
                         </form>
@@ -52,6 +99,7 @@
         {% endif %}
     </div>
 
+    <a href="{{ url_for('admin_gestori') }}" class="btn btn-outline">Vai a Gestione Gestori</a>
     <a href="{{ url_for('admin_layout_posti') }}" class="btn btn-outline">Vai a Gestione Layout Posti</a>
     <a href="{{ url_for('calendar_view') }}" class="btn btn-outline">Torna al Calendario</a>
 </div>

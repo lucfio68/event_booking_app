@@ -69,8 +69,16 @@ class GenereEvento(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nome = db.Column(db.String(100), nullable=False)  # es. "Concerto", "Conferenza", "Teatro"
     descrizione = db.Column(db.Text, nullable=True)
+    # Fase C - Step 2: ogni Genere appartiene (facoltativamente) a un Gestore.
+    # I generi creati in Fase A restano con gestore_id NULL e restano utilizzabili
+    # (mostrati quando la sala non ha un Gestore di default assegnato).
+    gestore_id = db.Column(db.Integer, db.ForeignKey('gestore.id'), nullable=True, index=True)
+    descrizione_aggiuntiva = db.Column(db.Text, nullable=True)
+    logo = db.Column(db.LargeBinary, nullable=True)
+    logo_mimetype = db.Column(db.String(50), nullable=True)
 
     layout = db.relationship('LayoutPosti', backref='genere_evento', lazy=True)
+    gestore = db.relationship('Gestore', backref='generi')
 
 class LayoutPosti(db.Model):
     __tablename__ = 'layout_posti'

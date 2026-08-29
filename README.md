@@ -31,8 +31,11 @@ Repo: https://github.com/lucfio68/event_booking_app
 **Fase B considerata chiusa** salvo emergano errori durante il test conclusivo di Step 1-3 già consegnati.
 
 **Fase C — Gestore Evento e Generi per Gestore: 🔶 IN ANALISI**
-- **Step 1 — Tabella Gestore (anagrafica + logo) e CRUD: ⬜ DA FARE**
-- **Step 2 — GenereEvento aggiornato (gestore_id, logo, descrizione aggiuntiva) e CRUD: ⬜ DA FARE**
+- **Step 1 — Tabella Gestore (anagrafica + logo) e CRUD: ✅ COMPLETATO E TESTATO**
+  Modello `Gestore` (solo `ragione_sociale` obbligatoria), logo salvato come blob nel DB (`logo`/`logo_mimetype`), servito da `/gestore/<id>/logo`. CRUD in `/admin/gestori*`, template `admin_gestori.html`. Upload validato: max 2 MB, formati PNG/JPG/GIF/WEBP/SVG.
+- **Step 2 — GenereEvento aggiornato (gestore_id, logo, descrizione aggiuntiva) e CRUD: ✅ IMPLEMENTATO, DA TESTARE**
+  `GenereEvento` guadagna `gestore_id` (nullable — i generi Fase A restano generici), `logo`/`logo_mimetype` (blob), `descrizione_aggiuntiva`. Univocità del nome ora per-gestore (due gestori diversi possono avere un genere con lo stesso nome). CRUD aggiornato con supporto modifica (prima c'era solo aggiungi/elimina) in `admin_generi.html`. Route logo: `/genere/<id>/logo`.
+  **Da fare prima del primo test**: visitare `/admin/migrate-generi-gestore?key=<MIGRATION_SECRET>` — `genere_evento` è una tabella già esistente e popolata dalla Fase A, serve la stessa migrazione già vista per `Evento` in Fase B.
 - **Step 3 — Sala con Gestore di default: ⬜ DA FARE**
 - **Step 4 — Creazione evento a cascata (Sala → Gestore → Genere filtrato con logo): ⬜ DA FARE**
 - **Step 5 — Import Google Calendar con campo Gestore: ⬜ DA FARE**
@@ -185,6 +188,8 @@ https://raw.githubusercontent.com/lucfio68/event_booking_app/main/app.py
 
 ## Changelog Fase B (versioning delle modifiche)
 
+- **28 agosto 2026** — Fase C, Step 2 implementato: `GenereEvento` con `gestore_id`/logo/descrizione aggiuntiva, CRUD con supporto modifica, migrazione `/admin/migrate-generi-gestore`.
+- **28 agosto 2026** — Fase C, Step 1 completato e testato: tabella `Gestore` + CRUD + logo (blob nel DB).
 - **28 agosto 2026** — Fase B chiusa: Step 4 (Export) congelato su decisione dell'utente, non necessario. Aperta l'analisi della Fase C (Gestore Evento e Generi per Gestore) e della Fase D (Stampe A3 + Check-in QR Code, rinominata da Fase C).
 - **v1.3.0 (26 agosto 2026)** — Step 3: import manuale con anteprima/diff. Nuove colonne su `Evento` (`origine`, `google_event_id`, `google_calendar_id_origine`, `google_updated`, `cancellato_google`), nuova route di migrazione `/admin/migrate-google-import`, nuovo template `admin_google_import.html`, filtro `cancellato_google` su `/api/events` e blocco prenotazione su eventi annullati in `booking_page`.
 - **v1.2.0 (26 agosto 2026)** — Step 2: associazione Sala ↔ Calendario (`CalendarioGoogle`, route `/admin/google/sale*`, template `admin_google_sale.html`).
