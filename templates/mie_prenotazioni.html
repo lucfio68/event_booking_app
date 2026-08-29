@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Le mie prenotazioni{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <h2>🎟️ Le mie prenotazioni</h2>
+    <p class="text-muted">Tutte le prenotazioni fatte con il tuo account, divise tra prossime e passate.</p>
+
+    <div class="prenotazioni-list">
+        <h3>Prossime ({{ future|length }})</h3>
+        {% if future %}
+        <table class="table">
+            <thead>
+                <tr><th>Evento</th><th>Data</th><th>Ora</th><th>Sala</th><th>Posti</th><th>Stato</th></tr>
+            </thead>
+            <tbody>
+                {% for v in future %}
+                <tr>
+                    <td>
+                        {{ v.evento.nome }}
+                        {% if v.evento.cancellato_google %}<br><span class="badge" style="background:#e74c3c; color:#fff;">Evento annullato</span>{% endif %}
+                        {% if v.prenotazione.nome_prenotazione %}<br><span class="text-muted" style="font-size:0.85em;">a nome di: {{ v.prenotazione.nome_prenotazione }}</span>{% endif %}
+                    </td>
+                    <td>{{ v.evento.data_evento.strftime('%d/%m/%Y') }}</td>
+                    <td>{{ v.evento.ora_inizio.strftime('%H:%M') }}</td>
+                    <td>{{ v.sala.nome }}</td>
+                    <td>{{ v.posti_label }}</td>
+                    <td><span class="badge">{{ v.prenotazione.stato }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted">Nessuna prenotazione in programma. <a href="{{ url_for('calendar_view') }}">Vai al calendario</a> per prenotarne una.</p>
+        {% endif %}
+    </div>
+
+    <div class="prenotazioni-list">
+        <h3>Passate ({{ passate|length }})</h3>
+        {% if passate %}
+        <table class="table">
+            <thead>
+                <tr><th>Evento</th><th>Data</th><th>Ora</th><th>Sala</th><th>Posti</th></tr>
+            </thead>
+            <tbody>
+                {% for v in passate %}
+                <tr style="color:#999;">
+                    <td>{{ v.evento.nome }}</td>
+                    <td>{{ v.evento.data_evento.strftime('%d/%m/%Y') }}</td>
+                    <td>{{ v.evento.ora_inizio.strftime('%H:%M') }}</td>
+                    <td>{{ v.sala.nome }}</td>
+                    <td>{{ v.posti_label }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted">Nessuna prenotazione passata.</p>
+        {% endif %}
+    </div>
+
+    <a href="{{ url_for('calendar_view') }}" class="btn btn-outline">Torna al Calendario</a>
+</div>
+{% endblock %}

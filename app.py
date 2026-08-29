@@ -630,6 +630,37 @@ def api_event_detail(event_id):
         'colonne': ev.colonne
     })
 
+@app.route('/le-mie-prenotazioni')
+@login_required
+def mie_prenotazioni():
+    oggi = date.today()
+    prenotazioni = (
+        Prenotazione.query
+        .join(Evento)
+        .filter(Prenotazione.utente_id == current_user.id)
+        .all()
+    )
+
+    def posti_label(p):
+        posti_ordinati = sorted(p.posti, key=lambda po: (po.fila, po.colonna))
+        return ', '.join(f'{po.fila}{po.colonna}' for po in posti_ordinati)
+
+    future, passate = [], []
+    for p in prenotazioni:
+        voce = {
+            'prenotazione': p,
+            'evento': p.evento,
+            'sala': p.evento.sala,
+            'posti_label': posti_label(p),
+        }
+        (future if p.evento.data_evento >= oggi else passate).append(voce)
+
+    future.sort(key=lambda v: (v['evento'].data_evento, v['evento'].ora_inizio))
+    passate.sort(key=lambda v: (v['evento'].data_evento, v['evento'].ora_inizio), reverse=True)
+
+    return render_template('mie_prenotazioni.html', future=future, passate=passate)
+
+
 # ==================== GESTIONE EVENTI (ADMIN) ====================
 
 @app.route('/event/create', methods=['GET', 'POST'])

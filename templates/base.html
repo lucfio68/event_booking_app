@@ -28,6 +28,7 @@
                     <a href="{{ url_for('calendar_view') }}" class="btn btn-primary">📅 Calendario</a>
                 {% endif %}
                 <a href="{{ url_for('guida') }}" class="btn btn-guide" target="_blank">📖 Guida</a>
+                <a href="{{ url_for('mie_prenotazioni') }}" class="btn btn-secondary">🎟️ Le mie prenotazioni</a>
                 {% if current_user.is_admin() %}
                     <a href="{{ url_for('admin_sale') }}" class="btn btn-secondary">🏛️ Sale</a>
                     <a href="{{ url_for('admin_layout_posti') }}" class="btn btn-secondary">🪑 Layout Posti</a>
