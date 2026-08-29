@@ -4,7 +4,7 @@ App prenotazione evento/posto a sedere.
 
 Repo: https://github.com/lucfio68/event_booking_app
 
-## Stato del progetto (26 agosto 2026)
+## Stato del progetto (28 agosto 2026)
 
 **Fase A — Gestione Layout Posti: ✅ COMPLETATA**
 - Gestione Sale via UI (`admin_sale.html`)
@@ -16,7 +16,7 @@ Repo: https://github.com/lucfio68/event_booking_app
 - Guida utente/admin aggiornata e differenziata per ruolo (v1.7)
 - Vari fix responsive/PWA/dark-mode (vedi changelog nella guida per il dettaglio completo)
 
-**Fase B — Import/Export Google Calendar: 🔶 IN CORSO**
+**Fase B — Import Google Calendar: ✅ COMPLETATA (Step 4 congelato)**
 - **Step 1 — Connessione OAuth Google: ✅ COMPLETATO E TESTATO**
   Collega/scollega un singolo account Google (account Gmail normale, non Workspace). Modello `GoogleConnessione` (una sola connessione attiva alla volta, `refresh_token` cifrato con Fernet). Route: `/admin/google` (stato + test connessione elencando i calendari), `/admin/google/connect`, `/admin/google/callback`, `/admin/google/disconnect`. Template `admin_google.html`.
 - **Step 2 — Associazione Sala ↔ Calendario: ✅ IMPLEMENTATO, DA TESTARE**
@@ -25,7 +25,10 @@ Repo: https://github.com/lucfio68/event_booking_app
 - **Step 3 — Import manuale con anteprima/diff: ✅ IMPLEMENTATO, DA TESTARE**
   L'admin sceglie un calendario sorgente e un range di giorni; l'anteprima mostra eventi Nuovi / Modificati (con diff campo per campo) / Invariati / Non importabili (eventi "intera giornata") / Rimossi lato Google. Route: `/admin/google/import` (GET, anteprima), `/admin/google/import/applica` (POST, applica le azioni scelte riga per riga). Template `admin_google_import.html`. Nessuna chiamata scrive su Google in questo step (solo lettura, `calendar.readonly`).
   **Da fare prima del primo test**: visitare `/admin/migrate-google-import?key=<MIGRATION_SECRET>` — `Evento` è una tabella già esistente e `db.create_all()` (via `/init-db`) non aggiunge colonne a tabelle già presenti (lo fa solo per tabelle nuove come `calendario_google` in Step 2). Questa route aggiunge le 5 colonne nuove + l'indice su `Evento` con lo stesso pattern già usato in Fase A (`/admin/migrate-layout-posti`).
-- **Step 4 — Export manuale con anteprima: ⬜ DA FARE**
+- **Step 4 — Export manuale con anteprima: ❄️ CONGELATO, non necessario**
+  Deciso il 28 agosto 2026: gli eventi restano un flusso a senso unico (Google → app). Non serve esportare verso Google eventi creati nell'app. Le fondamenta (`CalendarioGoogle` come destinazione teorica, campi di tracciabilità su `Evento`) restano comunque a disposizione se in futuro dovesse servire.
+
+**Fase B considerata chiusa** salvo emergano errori durante il test conclusivo di Step 1-3 già consegnati.
 
 ### Decisioni già prese per la Fase B (da rispettare, non da rimettere in discussione)
 
@@ -47,7 +50,33 @@ Repo: https://github.com/lucfio68/event_booking_app
 
 ### Approccio di lavoro da mantenere
 
-Procedere **uno step alla volta**, con un test di conferma dopo ogni step prima di passare al successivo — è l'approccio seguito per tutta la Fase A e ha funzionato bene per individuare rapidamente eventuali problemi.
+Procedere **uno step alla volta**, con un test di conferma dopo ogni step prima di passare al successivo — è l'approccio seguito per tutta la Fase A e la Fase B e ha funzionato bene per individuare rapidamente eventuali problemi.
+
+## Fase C — Stampe e Check-in con QR Code (in analisi, non ancora iniziata)
+
+Richiesta del 28 agosto 2026, da analizzare a step come le fasi precedenti prima di scrivere codice.
+
+**Obiettivo 1 — Stampa A3 mappa posti + elenco prenotazioni**
+Un admin deve poter generare un PDF formato A3 con la situazione dei posti prenotati e l'elenco delle prenotazioni di un evento, da usare all'ingresso per indirizzare le persone al proprio posto al momento dell'acquisto/ritiro biglietto.
+
+**Obiettivo 2 — Biglietto virtuale con QR code**
+Alla conferma di una prenotazione, inviare (probabilmente via email, riusando `_send_confirmation_email` già esistente) anche un biglietto con QR code. Leggendo il QR con l'app da un telefono con utente admin, o da un totem con lettore dedicato all'ingresso, il sistema deve mostrare le indicazioni per accompagnare la persona al proprio posto.
+
+### Step proposti (da confermare)
+
+- **Step 1 — Generazione PDF A3**: nuova libreria Python per PDF (proposta: `reportlab`, puro Python, senza dipendenze di sistema pesanti — più adatto a un deploy Render rispetto a `weasyprint` che richiede Cairo/Pango). Route admin "Stampa" su un evento: disegna la mappa posti colorata (stessa logica fila/colonna/corridoi già usata per il grid a schermo) più una tabella con nome/posti/stato di ogni prenotazione.
+- **Step 2 — Generazione QR code e biglietto**: libreria `qrcode` (pura Python). Il QR non deve contenere l'id della prenotazione in chiaro ma un token firmato (via `itsdangerous`, già una dipendenza del progetto) per evitare che si possa costruire/indovinare il QR di qualcun altro. Il QR punta a un URL del tipo `/admin/checkin/<token>`.
+- **Step 3 — Pagina di check-in da telefono admin**: aprendo quell'URL (autenticato come admin) si vede una schermata con nome/evento/sala/posti da comunicare alla persona. Nessuna libreria di scansione in-app necessaria se il QR è semplicemente un URL: la fotocamera nativa del telefono lo apre da sola.
+- **Step 4 — Totem con lettore fisico all'ingresso**: pagina "chiosco" a schermo intero pensata per un lettore QR hardware collegato come tastiera (digita il contenuto scansionato + invio in un campo sempre attivo), mostra a caratteri grandi le indicazioni e si resetta per la scansione successiva. Richiede una decisione sull'accesso (vedi punti aperti sotto): non è detto sia sicuro lasciare una sessione admin completa aperta su un dispositivo incustodito all'ingresso.
+
+### Punti aperti da decidere insieme prima di scrivere codice
+
+- **Cosa stampare in A3**: mappa posti soltanto, o anche una seconda pagina con l'elenco nominale ordinato (per cercare più velocemente una persona per cognome)?
+- **Quando generare il PDF**: on-demand ogni volta che serve (sempre aggiornato, ma un click in più prima di ogni turno), oppure con un pulsante dedicato "Stampa mappa" nella pagina evento?
+- **Un solo QR per prenotazione o un QR per singolo posto**: dato che una prenotazione può includere più posti, il QR identifica l'intera prenotazione (mostrando tutti i posti insieme) o serve un QR distinto per ciascun posto/persona?
+- **QR monouso o riusabile**: serve segnare la prenotazione come "check-in effettuato" per evitare che lo stesso biglietto venga riletto più volte (rivendita, ingresso multiplo), oppure la lettura è solo informativa senza tracciare lo stato?
+- **Sicurezza del totem**: una sessione admin lasciata aperta su un dispositivo fisico all'ingresso è un rischio (accesso a tutto il pannello admin se rubato/manomesso). Alternative: un token dedicato "solo lettura check-in" separato dal login admin completo, oppure si accetta il rischio assumendo il totem sorvegliato.
+- **Hardware del totem**: già disponibile (marca/modello del lettore QR) o ancora da scegliere? Cambia se serve emulazione tastiera (soluzione più semplice, sopra) o integrazione più complessa.
 
 ## Struttura del progetto
 
@@ -115,6 +144,7 @@ https://raw.githubusercontent.com/lucfio68/event_booking_app/main/app.py
 
 ## Changelog Fase B (versioning delle modifiche)
 
+- **28 agosto 2026** — Fase B chiusa: Step 4 (Export) congelato su decisione dell'utente, non necessario. Aperta l'analisi della Fase C (Stampe A3 + Check-in QR Code).
 - **v1.3.0 (26 agosto 2026)** — Step 3: import manuale con anteprima/diff. Nuove colonne su `Evento` (`origine`, `google_event_id`, `google_calendar_id_origine`, `google_updated`, `cancellato_google`), nuova route di migrazione `/admin/migrate-google-import`, nuovo template `admin_google_import.html`, filtro `cancellato_google` su `/api/events` e blocco prenotazione su eventi annullati in `booking_page`.
 - **v1.2.0 (26 agosto 2026)** — Step 2: associazione Sala ↔ Calendario (`CalendarioGoogle`, route `/admin/google/sale*`, template `admin_google_sale.html`).
 - **v1.1.0 (data non specificata, dichiarato completato e testato dall'utente)** — Step 1: connessione OAuth Google (`GoogleConnessione`, route `/admin/google*`, template `admin_google.html`).
