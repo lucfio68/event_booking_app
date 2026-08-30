@@ -12,7 +12,7 @@
             <select name="sala_id" id="salaSelect" required class="form-control">
                 <option value="">-- Seleziona Sala --</option>
                 {% for sala in sale %}
-                <option value="{{ sala.id }}" data-posti="{{ sala.posti_max }}" data-overbooking="{{ sala.overbooking_max }}">{{ sala.nome }} (max {{ sala.posti_max }} posti{% if sala.overbooking_max %}, +{{ sala.overbooking_max }} con overbooking{% endif %})</option>
+                <option value="{{ sala.id }}" data-posti="{{ sala.posti_max }}" data-overbooking="{{ sala.overbooking_max }}" data-gestore-default="{{ sala.gestore_default_id or '' }}">{{ sala.nome }} (max {{ sala.posti_max }} posti{% if sala.overbooking_max %}, +{{ sala.overbooking_max }} con overbooking{% endif %})</option>
                 {% endfor %}
             </select>
             <div id="linkGestisciLayout" style="margin-top:8px; display:none;">
@@ -20,15 +20,23 @@
             </div>
         </div>
 
+        <div class="form-group">
+            <label>Gestore <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(precompilato dal default della sala, sempre cambiabile)</span></label>
+            <select name="gestore_id" id="gestoreSelect" class="form-control">
+                <option value="">-- Nessuno --</option>
+                {% for g in gestori %}
+                <option value="{{ g.id }}">{{ g.ragione_sociale }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
         <div class="form-row">
             <div class="form-group col-6">
-                <label>Genere Evento <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(opzionale)</span></label>
+                <label>Genere Evento <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(opzionale, filtrato sul Gestore scelto)</span></label>
                 <select name="genere_evento_id" id="genereSelect" class="form-control">
                     <option value="">-- Nessuno --</option>
-                    {% for g in generi %}
-                    <option value="{{ g.id }}">{{ g.nome }}</option>
-                    {% endfor %}
                 </select>
+                <img id="genereLogoPreview" src="" alt="Logo genere" style="display:none; max-height:32px; max-width:120px; margin-top:6px;">
             </div>
             <div class="form-group col-6">
                 <label>Layout Posti</label>
@@ -140,6 +148,16 @@
         {% endfor %}
     ];
 
+    const ALL_GENERI = [
+        {% for g in generi %}
+        {
+            id: {{ g.id }}, nome: {{ g.nome|tojson }},
+            gestore_id: {{ g.gestore_id or 'null' }},
+            has_logo: {{ 'true' if g.logo else 'false' }}
+        },
+        {% endfor %}
+    ];
+
     document.addEventListener('DOMContentLoaded', function() {
         const urlParams = new URLSearchParams(window.location.search);
         const dateParam = urlParams.get('date');
@@ -148,7 +166,9 @@
         }
         
         const salaSelect = document.getElementById('salaSelect');
+        const gestoreSelect = document.getElementById('gestoreSelect');
         const genereSelect = document.getElementById('genereSelect');
+        const genereLogoPreview = document.getElementById('genereLogoPreview');
         const layoutSelect = document.getElementById('layoutSelect');
         const layoutIdInput = document.getElementById('layoutIdInput');
         const customGridFields = document.getElementById('customGridFields');
@@ -172,6 +192,36 @@
                 opt.textContent = l.nome + ' (' + l.file + '×' + l.colonne + (l.is_default ? ', default' : '') + ')';
                 layoutSelect.appendChild(opt);
             });
+        }
+
+        function updateGenereLogoPreview() {
+            const selectedId = parseInt(genereSelect.value) || null;
+            const genere = selectedId ? ALL_GENERI.find(function(g) { return g.id === selectedId; }) : null;
+            if (genere && genere.has_logo) {
+                genereLogoPreview.src = '/genere/' + genere.id + '/logo';
+                genereLogoPreview.style.display = 'block';
+            } else {
+                genereLogoPreview.src = '';
+                genereLogoPreview.style.display = 'none';
+            }
+        }
+
+        function refreshGenereOptions() {
+            // Gestore vuoto -> mostra i generi "generici" (senza gestore, es. quelli della Fase A).
+            // Gestore scelto -> mostra SOLO i generi di quel gestore.
+            const gestoreId = parseInt(gestoreSelect.value) || null;
+            const valorePrecedente = genereSelect.value;
+            genereSelect.innerHTML = '<option value="">-- Nessuno --</option>';
+            ALL_GENERI.filter(function(g) { return g.gestore_id === gestoreId; }).forEach(function(g) {
+                const opt = document.createElement('option');
+                opt.value = g.id;
+                opt.textContent = g.nome;
+                genereSelect.appendChild(opt);
+            });
+            // Se il genere selezionato in precedenza non è più tra le opzioni valide, resetta.
+            const valoreValido = Array.prototype.some.call(genereSelect.options, function(o) { return o.value === valorePrecedente; });
+            genereSelect.value = valoreValido ? valorePrecedente : '';
+            updateGenereLogoPreview();
         }
 
         function applyLayoutSelection() {
@@ -226,13 +276,17 @@
             layoutSelect.value = '';
             applyLayoutSelection();
 
+            const selectedOption = salaSelect.options[salaSelect.selectedIndex];
+            const gestoreDefault = selectedOption.dataset.gestoreDefault || '';
+            gestoreSelect.value = gestoreDefault;
+            refreshGenereOptions();
+
             const linkDiv = document.getElementById('linkGestisciLayout');
             const linkHref = document.getElementById('linkGestisciLayoutHref');
             if (salaSelect.value) {
                 linkHref.href = '/admin/layout-posti?sala_id=' + salaSelect.value;
                 linkDiv.style.display = 'block';
 
-                const selectedOption = salaSelect.options[salaSelect.selectedIndex];
                 const maxPosti = parseInt(selectedOption.dataset.posti) || 0;
                 const maxOverbooking = parseInt(selectedOption.dataset.overbooking) || 0;
                 if (maxOverbooking > 0) {
@@ -245,12 +299,15 @@
                 overbookingHint.textContent = 'Seleziona una sala per vedere il tetto di overbooking disponibile.';
             }
         });
+        gestoreSelect.addEventListener('change', refreshGenereOptions);
+        genereSelect.addEventListener('change', updateGenereLogoPreview);
         layoutSelect.addEventListener('change', applyLayoutSelection);
         fileInput.addEventListener('input', calculateSeats);
         colonneInput.addEventListener('input', calculateSeats);
         overbookingCheckbox.addEventListener('change', calculateSeats);
 
         refreshLayoutOptions();
+        refreshGenereOptions();
     });
 </script>
 {% endblock %}

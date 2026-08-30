@@ -5,7 +5,14 @@
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
         <div>
             <h2>Gestione Evento: {{ evento.nome }}</h2>
-            <p><strong>Data:</strong> {{ evento.data_evento.strftime('%d/%m/%Y') }} | <strong>Sala:</strong> {{ evento.sala.nome }}</p>
+            <p><strong>Data:</strong> {{ evento.data_evento.strftime('%d/%m/%Y') }} | <strong>Sala:</strong> {{ evento.sala.nome }}
+                {% if evento.gestore or evento.genere %} | <strong>Gestore:</strong> {{ evento.gestore.ragione_sociale if evento.gestore else '-' }}
+                | <strong>Genere:</strong> {{ evento.genere.nome if evento.genere else '-' }}
+                {% if evento.genere and evento.genere.logo %}
+                <img src="{{ url_for('logo_genere', genere_id=evento.genere.id) }}" alt="Logo genere" style="height:22px; vertical-align:middle; margin-left:4px;">
+                {% endif %}
+                {% endif %}
+            </p>
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
             <a href="{{ url_for('admin_evento_layout', event_id=evento.id) }}" class="btn btn-secondary">🔧 Modifica Layout</a>

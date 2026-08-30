@@ -126,6 +126,8 @@ class Evento(db.Model):
     # Tracciabilità: da quale layout/genere è nato l'evento (i valori restano copiati sopra, invariati anche se il layout cambia in futuro)
     layout_posti_id = db.Column(db.Integer, db.ForeignKey('layout_posti.id'), nullable=True)
     genere_evento_id = db.Column(db.Integer, db.ForeignKey('genere_evento.id'), nullable=True)
+    # Fase C - Step 4: tracciabilità del Gestore scelto in creazione evento (facoltativo)
+    gestore_id = db.Column(db.Integer, db.ForeignKey('gestore.id'), nullable=True, index=True)
     overbooking_abilitato = db.Column(db.Boolean, default=False, nullable=False)  # se True, l'evento può superare sala.posti_max (fino a +overbooking_max); serve anche per abilitare aggiunte future oltre il limite
 
     # Fase B - Step 3: tracciabilità import da Google Calendar
@@ -137,6 +139,8 @@ class Evento(db.Model):
 
     posti = db.relationship('Posto', backref='evento', lazy=True, cascade='all, delete-orphan')
     prenotazioni = db.relationship('Prenotazione', backref='evento', lazy=True, cascade='all, delete-orphan')
+    gestore = db.relationship('Gestore', foreign_keys=[gestore_id])
+    genere = db.relationship('GenereEvento', foreign_keys=[genere_evento_id])
 
 class Prenotazione(db.Model):
     __tablename__ = 'prenotazione'

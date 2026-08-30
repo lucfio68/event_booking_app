@@ -330,6 +330,7 @@
         <li><a href="#admin-google-oauth">3.15 Google Calendar — Connessione</a></li>
         <li><a href="#admin-google-sale">3.16 Google Calendar — Sale ↔ Calendari</a></li>
         <li><a href="#admin-google-import">3.17 Google Calendar — Import Eventi</a></li>
+        <li><a href="#admin-gestori">3.18 Gestione Gestori</a></li>
         <li><a href="#schema">4. Schema Database</a></li>
         <li><a href="#faq-overbooking">4.1 Overbooking — come funziona</a></li>
         {% endif %}
@@ -939,6 +940,13 @@ source venv/bin/activate    (Linux/Mac)</pre>
     <div class="step">
         <div class="step-num">3</div>
         <div class="step-content">
+            <h4>Gestore di default <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(facoltativo)</span></h4>
+            <p>Se assegni un <a href="#admin-gestori">Gestore</a> a questa sala, verrà proposto automaticamente ogni volta che crei un evento per questa sala (resta comunque sempre cambiabile in quel momento). Puoi lasciarlo vuoto: in quel caso, in creazione evento partirai senza Gestore preselezionato.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
             <h4>Salva</h4>
             <p>Clicca <strong>Crea Sala</strong>. La sala comparirà subito nell'elenco e sarà selezionabile in Layout Posti e in Creazione Evento.</p>
         </div>
@@ -958,13 +966,27 @@ source venv/bin/activate    (Linux/Mac)</pre>
         <div class="step-num">1</div>
         <div class="step-content">
             <h4>Crea un genere</h4>
-            <p>Nome (obbligatorio) e descrizione (opzionale). È un'etichetta libera, associabile poi a uno o più Layout Posti.</p>
+            <p>Nome (obbligatorio), descrizione interna (opzionale, solo uso admin) e descrizione aggiuntiva (opzionale, pensata per comparire in futuro lato utente/biglietto).</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Gestore <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(facoltativo)</span></h4>
+            <p>Puoi assegnare il genere a un <a href="#admin-gestori">Gestore</a>: da quel momento comparirà solo quando quel Gestore è selezionato in creazione evento. Se lasci "-- nessuno --", il genere resta "generico" (disponibile quando in creazione evento non è stato scelto nessun Gestore).</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Logo <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(facoltativo, max 2 MB — PNG/JPG/GIF/WEBP/SVG)</span></h4>
+            <p>Comparirà in anteprima ovunque il genere venga scelto (creazione evento, gestione evento) e in futuro sui biglietti.</p>
         </div>
     </div>
     <div class="alert alert-info">
-        <strong>Nota:</strong> il genere è opzionale — un Layout Posti può anche non avere nessun genere associato ("layout generico per la sala"), utile se non ti serve questa distinzione.
+        <strong>Nota:</strong> il genere resta sempre opzionale — un Layout Posti o un Evento possono anche non avere nessun genere associato ("generico"). Il nome deve essere univoco solo <strong>all'interno dello stesso Gestore</strong>: due Gestori diversi possono avere entrambi, ad esempio, un genere chiamato "Concerto".
     </div>
-    <p><strong>Eliminazione:</strong> bloccata se il genere è ancora usato da uno o più layout esistenti — scollega prima quei layout.</p>
+    <p><strong>Eliminazione:</strong> bloccata se il genere è ancora usato da uno o più layout o eventi esistenti — scollega prima quelli.</p>
 </div>
 
 <div class="section" id="admin-layout-posti">
@@ -1019,7 +1041,8 @@ source venv/bin/activate    (Linux/Mac)</pre>
             <table>
                 <tr><th>Campo</th><th>Descrizione</th></tr>
                 <tr><td>Sala</td><td>Seleziona la sala dall'elenco. Appare anche il link "📐 Gestisci layout per questa sala" per aprire in una nuova scheda la gestione layout, se serve configurarne uno al volo</td></tr>
-                <tr><td>Genere Evento</td><td>Opzionale — es. "Concerto", "Conferenza"</td></tr>
+                <tr><td>Gestore</td><td>Si precompila automaticamente con il Gestore di default della sala scelta (se impostato in <a href="#admin-sale">Gestione Sale</a>), ma resta sempre cambiabile con qualunque altro Gestore esistente</td></tr>
+                <tr><td>Genere Evento</td><td>Opzionale — es. "Concerto", "Conferenza". Il menu si aggiorna in base al Gestore scelto: se non c'è un Gestore, mostra i generi "generici" (senza gestore); se c'è un Gestore, mostra solo i suoi generi. Se il genere ha un logo, compare in anteprima sotto il menu</td></tr>
                 <tr><td>Layout Posti</td><td>Se la sala ha layout salvati, scegline uno per precompilare automaticamente file/colonne/corridoi, oppure lascia "Layout personalizzato" per inserirli a mano</td></tr>
             </table>
         </div>
@@ -1523,6 +1546,34 @@ source venv/bin/activate    (Linux/Mac)</pre>
     </table>
 </div>
 
+<div class="section" id="admin-gestori">
+    <h2><span class="badge badge-admin">Admin</span> 3.18 Gestione Gestori</h2>
+    <p>I <strong>Gestori</strong> sono gli organizzatori/enti che gestiscono eventi (ragione sociale, indirizzo, CF/P.IVA, contatti, certificazioni, logo). Servono a collegare ogni evento a chi lo organizza, e a filtrare i <a href="#admin-generi">Generi Evento</a> disponibili in creazione evento. Si gestiscono dalla pagina <strong>🏢 Gestori</strong> in navbar.</p>
+    <h3>Creare un Gestore</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Compila l'anagrafica</h4>
+            <p>Solo la <strong>Ragione Sociale</strong> è obbligatoria — tutti gli altri campi (indirizzo, CF/P.IVA, cellulare, email, PEC, certificazioni, logo) sono facoltativi e puoi completarli anche in un secondo momento.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Certificazioni <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(testo libero)</span></h4>
+            <p>Pensato per annotare numeri di registrazione, certificazioni o simili da poter riprendere in futuro in email o schermate rivolte al pubblico — non è un elenco strutturato, scrivi liberamente.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Logo <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(facoltativo, max 2 MB — PNG/JPG/GIF/WEBP/SVG)</span></h4>
+            <p>Salvato nel database (non su file, per restare al sicuro anche dopo un riavvio del server). In modifica puoi sostituirlo o spuntare "Rimuovi logo attuale" per toglierlo.</p>
+        </div>
+    </div>
+    <p><strong>Dove si usa un Gestore:</strong> assegnalo come <a href="#admin-sale">Gestore di default di una Sala</a> (proposto automaticamente, sempre cambiabile) e ai <a href="#admin-generi">Generi Evento</a> di sua competenza — insieme determinano cosa vedi nel modulo di <a href="#admin-eventi">Creazione Evento</a>.</p>
+</div>
+
 <div class="section" id="schema">
     <h2>🗄️ 4. Schema Database</h2>
     <p>L'applicazione utilizza PostgreSQL (Neon) con il seguente schema relazionale:</p>
@@ -1540,29 +1591,53 @@ source venv/bin/activate    (Linux/Mac)</pre>
 │ data_registrazione│ DATETIME  │ No       │ Auto                        │
 └─────────────────┴─────────────┴──────────┴─────────────────────────────┘
     </div>
-    <h3>Tabella <code>sala</code></h3>
+    <h3>Tabella <code>gestore</code> <span style="font-weight:normal; font-size:0.8em;">(Fase C)</span></h3>
     <div class="schema-box">
 ┌─────────────────┬─────────────┬──────────┬─────────────────────────────┐
 │ Campo           │ Tipo        │ Obblig.  │ Note                        │
 ├─────────────────┼─────────────┼──────────┼─────────────────────────────┤
 │ id              │ INTEGER PK  │ Si'       │ Auto-increment              │
-│ nome            │ VARCHAR(100)│ Si'       │ Nome identificativo         │
-│ descrizione     │ TEXT        │ No       │ Dettagli e dotazioni        │
-│ indirizzo       │ VARCHAR(255)│ No       │ Indirizzo fisico            │
-│ posti_max       │ INTEGER     │ Si'       │ Capacita' massima            │
-│ overbooking_max │ INTEGER     │ No       │ Tetto extra posti (0=nessuno)│
-│ email_admin     │ TEXT        │ No       │ Email separate da virgola   │
+│ ragione_sociale │ VARCHAR(150)│ Si'       │ Unico campo obbligatorio    │
+│ indirizzo       │ VARCHAR(255)│ No       │                             │
+│ cf_piva         │ VARCHAR(50) │ No       │ Codice Fiscale / P.IVA      │
+│ cellulare       │ VARCHAR(20) │ No       │                             │
+│ email           │ VARCHAR(120)│ No       │                             │
+│ pec             │ VARCHAR(120)│ No       │                             │
+│ certificazioni  │ TEXT        │ No       │ Testo libero                │
+│ logo            │ BYTEA       │ No       │ Blob immagine                │
+│ logo_mimetype   │ VARCHAR(50) │ No       │ es. image/png                │
+│ creato_da       │ INTEGER FK  │ No       │ -> utente.id                 │
+│ data_creazione  │ DATETIME    │ No       │ Auto                        │
 └─────────────────┴─────────────┴──────────┴─────────────────────────────┘
+    </div>
+    <h3>Tabella <code>sala</code></h3>
+    <div class="schema-box">
+┌─────────────────────┬─────────────┬──────────┬─────────────────────────────┐
+│ Campo               │ Tipo        │ Obblig.  │ Note                        │
+├─────────────────────┼─────────────┼──────────┼─────────────────────────────┤
+│ id                  │ INTEGER PK  │ Si'       │ Auto-increment              │
+│ nome                │ VARCHAR(100)│ Si'       │ Nome identificativo         │
+│ descrizione         │ TEXT        │ No       │ Dettagli e dotazioni        │
+│ indirizzo           │ VARCHAR(255)│ No       │ Indirizzo fisico            │
+│ posti_max           │ INTEGER     │ Si'       │ Capacita' massima            │
+│ overbooking_max     │ INTEGER     │ No       │ Tetto extra posti (0=nessuno)│
+│ email_admin         │ TEXT        │ No       │ Email separate da virgola   │
+│ gestore_default_id  │ INTEGER FK  │ No       │ -> gestore.id (Fase C, facoltativo) │
+└─────────────────────┴─────────────┴──────────┴─────────────────────────────┘
     </div>
     <h3>Tabella <code>genere_evento</code></h3>
     <div class="schema-box">
-┌─────────────────┬─────────────┬──────────┬─────────────────────────────┐
-│ Campo           │ Tipo        │ Obblig.  │ Note                        │
-├─────────────────┼─────────────┼──────────┼─────────────────────────────┤
-│ id              │ INTEGER PK  │ Si'       │ Auto-increment              │
-│ nome            │ VARCHAR(100)│ Si'       │ es. "Concerto", "Teatro"    │
-│ descrizione     │ TEXT        │ No       │ Dettagli                    │
-└─────────────────┴─────────────┴──────────┴─────────────────────────────┘
+┌─────────────────────────┬─────────────┬──────────┬─────────────────────────────┐
+│ Campo                   │ Tipo        │ Obblig.  │ Note                        │
+├─────────────────────────┼─────────────┼──────────┼─────────────────────────────┤
+│ id                      │ INTEGER PK  │ Si'       │ Auto-increment              │
+│ nome                    │ VARCHAR(100)│ Si'       │ es. "Concerto", "Teatro"    │
+│ descrizione             │ TEXT        │ No       │ Dettagli (uso interno)      │
+│ gestore_id              │ INTEGER FK  │ No       │ -> gestore.id (Fase C, NULL=genere generico) │
+│ descrizione_aggiuntiva  │ TEXT        │ No       │ Potrà comparire lato utente/biglietto │
+│ logo                    │ BYTEA       │ No       │ Blob immagine                │
+│ logo_mimetype           │ VARCHAR(50) │ No       │ es. image/png                │
+└─────────────────────────┴─────────────┴──────────┴─────────────────────────────┘
     </div>
     <h3>Tabella <code>layout_posti</code></h3>
     <div class="schema-box">
@@ -1604,6 +1679,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
 │ data_creazione          │ DATETIME    │ No       │ Auto                        │
 │ layout_posti_id         │ INTEGER FK  │ No       │ -> layout_posti.id (tracciabilità) │
 │ genere_evento_id        │ INTEGER FK  │ No       │ -> genere_evento.id          │
+│ gestore_id              │ INTEGER FK  │ No       │ -> gestore.id (Fase C, facoltativo) │
 │ overbooking_abilitato   │ BOOLEAN     │ No       │ Se True può superare sala.posti_max │
 │ origine                 │ VARCHAR(20) │ No       │ 'app' (default) o 'google'  │
 │ google_event_id         │ VARCHAR(255)│ No       │ Id istanza Google (Fase B)  │
@@ -1682,6 +1758,9 @@ source venv/bin/activate    (Linux/Mac)</pre>
         <li><code>layout_posti</code> -> <code>evento</code> (1:N, tracciabilità)</li>
         <li><code>sala</code> -> <code>calendario_google</code> (1:1, Fase B)</li>
         <li><code>utente</code> -> <code>google_connessione</code> (1:N, ma una sola attiva alla volta, Fase B)</li>
+        <li><code>gestore</code> -> <code>genere_evento</code> (1:N, opzionale, Fase C)</li>
+        <li><code>gestore</code> -> <code>sala</code> (1:N come default, opzionale, Fase C)</li>
+        <li><code>gestore</code> -> <code>evento</code> (1:N, opzionale, Fase C)</li>
     </ul>
 </div>
 
@@ -1771,6 +1850,14 @@ source venv/bin/activate    (Linux/Mac)</pre>
 {% if current_user.is_admin() %}
 <div class="section" id="changelog">
     <h2>📝 6. Changelog</h2>
+
+    <h3>v2.0 (2026)</h3>
+    <ul>
+        <li><strong>Nuovo:</strong> Fase C (Gestore Evento) — nuova sezione "Gestione Gestori" (3.18): anagrafica organizzatori con logo salvato nel database</li>
+        <li><strong>Nuovo:</strong> Generi Evento (3.6) aggiornata — ogni genere può appartenere a un Gestore, avere un logo e una descrizione aggiuntiva; nome univoco per-gestore invece che globale</li>
+        <li><strong>Nuovo:</strong> Gestione Sale (3.5) — campo "Gestore di default", facoltativo</li>
+        <li><strong>Nuovo:</strong> Creazione Eventi (3.8) — selezione a cascata Sala → Gestore (precompilato dal default, sempre cambiabile) → Genere (filtrato sul Gestore, con anteprima logo)</li>
+    </ul>
 
     <h3>v1.9 (2026)</h3>
     <ul>

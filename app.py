@@ -681,6 +681,7 @@ def create_event():
         colonne = request.form.get('colonne', type=int)
         layout_id = request.form.get('layout_id', type=int) or None
         genere_evento_id = request.form.get('genere_evento_id', type=int) or None
+        gestore_id = request.form.get('gestore_id', type=int) or None
         overbooking_abilitato = request.form.get('overbooking_abilitato') == 'on'
         salva_layout_nome = request.form.get('salva_layout_nome', '').strip()
 
@@ -747,6 +748,7 @@ def create_event():
             corridoio_colonne=corridoio_colonne, corridoio_file=corridoio_file,
             sala_id=sala_id, creato_da=current_user.id,
             layout_posti_id=layout_id, genere_evento_id=genere_evento_id,
+            gestore_id=gestore_id,
             overbooking_abilitato=overbooking_abilitato
         )
         db.session.add(evento)
@@ -787,11 +789,12 @@ def create_event():
 
     sale = Sala.query.order_by(Sala.nome).all()
     generi = GenereEvento.query.order_by(GenereEvento.nome).all()
+    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
     layouts = LayoutPosti.query.all()
     real_today = date.today().strftime('%Y-%m-%d')
     selected_date = request.args.get('date', '')
     return render_template(
-        'event_create.html', sale=sale, generi=generi, layouts=layouts,
+        'event_create.html', sale=sale, generi=generi, gestori=gestori, layouts=layouts,
         today=real_today, selected_date=selected_date
     )
 
@@ -2415,7 +2418,37 @@ def migrate_generi_gestore():
         return f"❌ Errore durante la migrazione: {str(e)}", 500
 
 
-# ==================== MIGRAZIONE SALA / GESTORE DI DEFAULT (Fase C, Step 3) ====================
+# ==================== MIGRAZIONE EVENTO / GESTORE (Fase C, Step 4) ====================
+# Aggiunge la colonna gestore_id su 'evento' (tabella già esistente e popolata).
+
+@app.route('/admin/migrate-evento-gestore')
+@login_required
+def migrate_evento_gestore():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    try:
+        inspector = inspect(db.engine)
+        colonne_esistenti = [col['name'] for col in inspector.get_columns('evento')]
+
+        if 'gestore_id' not in colonne_esistenti:
+            db.session.execute(text(
+                "ALTER TABLE evento ADD COLUMN gestore_id INTEGER REFERENCES gestore(id)"
+            ))
+            indici_esistenti = [idx['name'] for idx in inspector.get_indexes('evento')]
+            if 'ix_evento_gestore_id' not in indici_esistenti:
+                db.session.execute(text("CREATE INDEX ix_evento_gestore_id ON evento (gestore_id)"))
+            db.session.commit()
+            return "✅ Migrazione completata!<br>Aggiunto: evento.gestore_id (+ indice)"
+        else:
+            return "ℹ️ Nessuna migrazione necessaria, evento.gestore_id esiste già."
+
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
 # Aggiunge la colonna gestore_default_id su 'sala' (tabella già esistente e
 # popolata dalla Fase A: db.create_all() non basta).
 

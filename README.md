@@ -39,7 +39,9 @@ Repo: https://github.com/lucfio68/event_booking_app
 - **Step 3 — Sala con Gestore di default: ✅ IMPLEMENTATO, DA TESTARE**
   `Sala.gestore_default_id` (nullable). Form "Gestione Sale" con select "Gestore di default" (facoltativo, "-- nessuno --" come opzione), tabella sale con colonna Gestore.
   **Da fare prima del primo test**: visitare `/admin/migrate-sala-gestore?key=<MIGRATION_SECRET>`.
-- **Step 4 — Creazione evento a cascata (Sala → Gestore → Genere filtrato con logo): ⬜ DA FARE**
+- **Step 4 — Creazione evento a cascata (Sala → Gestore → Genere filtrato con logo): ✅ IMPLEMENTATO, DA TESTARE**
+  `Evento` guadagna `gestore_id` (nullable, tracciabilità). In `event_create.html`: scegliendo la Sala si precompila il suo Gestore di default (sempre cambiabile); il menu Genere si filtra via JS in base al Gestore scelto (generi senza gestore se il Gestore è vuoto, altrimenti solo quelli di quel Gestore); se il genere selezionato ha un logo, viene mostrata un'anteprima. Aggiornata anche la pagina "Gestione Evento" (`admin_view.html`) per mostrare Gestore/Genere/logo nell'intestazione.
+  **Da fare prima del primo test**: visitare `/admin/migrate-evento-gestore?key=<MIGRATION_SECRET>`.
 - **Step 5 — Import Google Calendar con campo Gestore: ⬜ DA FARE**
 
 Dettaglio di ciascuno step, decisioni e punti aperti nella sezione dedicata più sotto.
@@ -190,6 +192,7 @@ https://raw.githubusercontent.com/lucfio68/event_booking_app/main/app.py
 
 ## Changelog Fase B (versioning delle modifiche)
 
+- **28 agosto 2026** — Fase C, Step 4 implementato: `Evento.gestore_id`, creazione evento a cascata (Sala→Gestore→Genere filtrato, con logo), aggiornata "Gestione Evento", migrazione `/admin/migrate-evento-gestore`.
 - **28 agosto 2026** — Fase C, Step 3 implementato: `Sala.gestore_default_id` (nullable), form/tabella "Gestione Sale" aggiornati, migrazione `/admin/migrate-sala-gestore`. Ordinamento "Gestione Generi Evento" per Gestore poi Genere.
 - **28 agosto 2026** — Fase C, Step 2 implementato: `GenereEvento` con `gestore_id`/logo/descrizione aggiuntiva, CRUD con supporto modifica, migrazione `/admin/migrate-generi-gestore`.
 - **28 agosto 2026** — Fase C, Step 1 completato e testato: tabella `Gestore` + CRUD + logo (blob nel DB).
