@@ -36,7 +36,9 @@ Repo: https://github.com/lucfio68/event_booking_app
 - **Step 2 — GenereEvento aggiornato (gestore_id, logo, descrizione aggiuntiva) e CRUD: ✅ IMPLEMENTATO, DA TESTARE**
   `GenereEvento` guadagna `gestore_id` (nullable — i generi Fase A restano generici), `logo`/`logo_mimetype` (blob), `descrizione_aggiuntiva`. Univocità del nome ora per-gestore (due gestori diversi possono avere un genere con lo stesso nome). CRUD aggiornato con supporto modifica (prima c'era solo aggiungi/elimina) in `admin_generi.html`. Route logo: `/genere/<id>/logo`.
   **Da fare prima del primo test**: visitare `/admin/migrate-generi-gestore?key=<MIGRATION_SECRET>` — `genere_evento` è una tabella già esistente e popolata dalla Fase A, serve la stessa migrazione già vista per `Evento` in Fase B.
-- **Step 3 — Sala con Gestore di default: ⬜ DA FARE**
+- **Step 3 — Sala con Gestore di default: ✅ IMPLEMENTATO, DA TESTARE**
+  `Sala.gestore_default_id` (nullable). Form "Gestione Sale" con select "Gestore di default" (facoltativo, "-- nessuno --" come opzione), tabella sale con colonna Gestore.
+  **Da fare prima del primo test**: visitare `/admin/migrate-sala-gestore?key=<MIGRATION_SECRET>`.
 - **Step 4 — Creazione evento a cascata (Sala → Gestore → Genere filtrato con logo): ⬜ DA FARE**
 - **Step 5 — Import Google Calendar con campo Gestore: ⬜ DA FARE**
 
@@ -188,6 +190,7 @@ https://raw.githubusercontent.com/lucfio68/event_booking_app/main/app.py
 
 ## Changelog Fase B (versioning delle modifiche)
 
+- **28 agosto 2026** — Fase C, Step 3 implementato: `Sala.gestore_default_id` (nullable), form/tabella "Gestione Sale" aggiornati, migrazione `/admin/migrate-sala-gestore`. Ordinamento "Gestione Generi Evento" per Gestore poi Genere.
 - **28 agosto 2026** — Fase C, Step 2 implementato: `GenereEvento` con `gestore_id`/logo/descrizione aggiuntiva, CRUD con supporto modifica, migrazione `/admin/migrate-generi-gestore`.
 - **28 agosto 2026** — Fase C, Step 1 completato e testato: tabella `Gestore` + CRUD + logo (blob nel DB).
 - **28 agosto 2026** — Fase B chiusa: Step 4 (Export) congelato su decisione dell'utente, non necessario. Aperta l'analisi della Fase C (Gestore Evento e Generi per Gestore) e della Fase D (Stampe A3 + Check-in QR Code, rinominata da Fase C).

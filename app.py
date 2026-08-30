@@ -1626,7 +1626,12 @@ def admin_generi():
         flash('Accesso riservato agli amministratori.', 'danger')
         return redirect(url_for('calendar_view'))
 
-    generi = GenereEvento.query.order_by(GenereEvento.nome).all()
+    generi = (
+        GenereEvento.query
+        .outerjoin(Gestore, GenereEvento.gestore_id == Gestore.id)
+        .order_by(Gestore.ragione_sociale.asc().nullslast(), GenereEvento.nome.asc())
+        .all()
+    )
     gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
     modifica_id = request.args.get('modifica', type=int)
     genere_da_modificare = db.session.get(GenereEvento, modifica_id) if modifica_id else None
@@ -2063,10 +2068,11 @@ def admin_sale():
         return redirect(url_for('calendar_view'))
 
     sale = Sala.query.order_by(Sala.nome).all()
+    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
     modifica_id = request.args.get('modifica', type=int)
     sala_da_modificare = db.session.get(Sala, modifica_id) if modifica_id else None
 
-    return render_template('admin_sale.html', sale=sale, sala_da_modificare=sala_da_modificare)
+    return render_template('admin_sale.html', sale=sale, gestori=gestori, sala_da_modificare=sala_da_modificare)
 
 
 @app.route('/admin/sale/add', methods=['POST'])
@@ -2100,7 +2106,8 @@ def admin_sale_add():
         indirizzo=indirizzo or None,
         posti_max=posti_max,
         overbooking_max=overbooking_max,
-        email_admin=email_admin or None
+        email_admin=email_admin or None,
+        gestore_default_id=request.form.get('gestore_default_id', type=int) or None,
     )
     db.session.add(sala)
     db.session.commit()
@@ -2156,6 +2163,7 @@ def admin_sale_edit(sala_id):
     sala.posti_max = posti_max
     sala.overbooking_max = overbooking_max
     sala.email_admin = email_admin or None
+    sala.gestore_default_id = request.form.get('gestore_default_id', type=int) or None
     db.session.commit()
     flash(f"Sala '{nome}' aggiornata.", 'success')
     return redirect(url_for('admin_sale'))
@@ -2401,6 +2409,37 @@ def migrate_generi_gestore():
             )
         else:
             return "ℹ️ Nessuna migrazione necessaria, colonne/indice già presenti.<br>" + '<br>'.join(esiti)
+
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+# ==================== MIGRAZIONE SALA / GESTORE DI DEFAULT (Fase C, Step 3) ====================
+# Aggiunge la colonna gestore_default_id su 'sala' (tabella già esistente e
+# popolata dalla Fase A: db.create_all() non basta).
+
+@app.route('/admin/migrate-sala-gestore')
+@login_required
+def migrate_sala_gestore():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    try:
+        inspector = inspect(db.engine)
+        colonne_esistenti = [col['name'] for col in inspector.get_columns('sala')]
+
+        if 'gestore_default_id' not in colonne_esistenti:
+            db.session.execute(text(
+                "ALTER TABLE sala ADD COLUMN gestore_default_id INTEGER REFERENCES gestore(id)"
+            ))
+            db.session.commit()
+            return "✅ Migrazione completata!<br>Aggiunto: sala.gestore_default_id"
+        else:
+            return "ℹ️ Nessuna migrazione necessaria, sala.gestore_default_id esiste già."
 
     except Exception as e:
         db.session.rollback()

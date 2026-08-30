@@ -43,6 +43,16 @@
             </div>
 
             <div class="form-group">
+                <label>Gestore di default <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(facoltativo — proposto in creazione evento, sempre cambiabile)</span></label>
+                <select name="gestore_default_id" class="form-control">
+                    <option value="">-- nessuno --</option>
+                    {% for g in gestori %}
+                    <option value="{{ g.id }}" {% if sala_da_modificare and sala_da_modificare.gestore_default_id == g.id %}selected{% endif %}>{{ g.ragione_sociale }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
                 <label>Email amministratori <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(separate da virgola, per notifiche)</span></label>
                 <input type="text" name="email_admin" class="form-control"
                        value="{{ sala_da_modificare.email_admin if sala_da_modificare else '' }}"
@@ -66,6 +76,7 @@
                     <th>Indirizzo</th>
                     <th>Capienza</th>
                     <th>Overbooking</th>
+                    <th>Gestore di default</th>
                     <th>Azioni</th>
                 </tr>
             </thead>
@@ -76,6 +87,7 @@
                     <td>{{ s.indirizzo or '-' }}</td>
                     <td>{{ s.posti_max }}</td>
                     <td>{{ ('+' ~ s.overbooking_max) if s.overbooking_max else '-' }}</td>
+                    <td>{{ s.gestore_default.ragione_sociale if s.gestore_default else '-' }}</td>
                     <td style="display:flex; gap:6px;">
                         <a href="{{ url_for('admin_sale', modifica=s.id) }}" class="btn btn-sm btn-secondary">Modifica</a>
                         <form method="POST" action="{{ url_for('admin_sale_delete', sala_id=s.id) }}" style="display:inline;" onsubmit="return confirm('Eliminare la sala &quot;{{ s.nome }}&quot;?');">
@@ -91,6 +103,7 @@
         {% endif %}
     </div>
 
+    <a href="{{ url_for('admin_gestori') }}" class="btn btn-outline">Vai a Gestione Gestori</a>
     <a href="{{ url_for('admin_layout_posti') }}" class="btn btn-outline">Vai a Gestione Layout Posti</a>
     <a href="{{ url_for('calendar_view') }}" class="btn btn-outline">Torna al Calendario</a>
 </div>

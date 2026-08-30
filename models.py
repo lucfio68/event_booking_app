@@ -37,9 +37,13 @@ class Sala(db.Model):
     posti_max = db.Column(db.Integer, nullable=False)
     overbooking_max = db.Column(db.Integer, nullable=False, default=0)  # posti extra consentiti oltre posti_max (0 = nessun overbooking permesso)
     email_admin = db.Column(db.Text, nullable=True)
+    # Fase C - Step 3: Gestore proposto di default in creazione evento per questa sala.
+    # Facoltativo (può restare vuoto) e sempre cambiabile con un altro Gestore in creazione evento.
+    gestore_default_id = db.Column(db.Integer, db.ForeignKey('gestore.id'), nullable=True)
 
     eventi = db.relationship('Evento', backref='sala', lazy=True, cascade='all, delete-orphan')
     posti = db.relationship('Posto', backref='sala', lazy=True, cascade='all, delete-orphan')
+    gestore_default = db.relationship('Gestore', foreign_keys=[gestore_default_id])
 
 class Gestore(db.Model):
     """
