@@ -29,6 +29,15 @@
                 <label>Importa eventi nei prossimi</label><br>
                 <input type="number" name="giorni" value="{{ giorni }}" min="1" max="365" class="form-control" style="width:90px;"> giorni
             </div>
+            <div>
+                <label>Gestore <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(facoltativo, filtra i Generi assegnabili alle righe)</span></label><br>
+                <select name="gestore_id" class="form-control">
+                    <option value="">-- Nessuno --</option>
+                    {% for g in gestori %}
+                    <option value="{{ g.id }}" {% if g.id == gestore_id_import %}selected{% endif %}>{{ g.ragione_sociale }}</option>
+                    {% endfor %}
+                </select>
+            </div>
             <button type="submit" class="btn btn-primary">🔍 Cerca eventi</button>
         </form>
     </div>
@@ -37,6 +46,7 @@
     <form method="POST" action="{{ url_for('admin_google_import_applica') }}">
         <input type="hidden" name="calendar_id" value="{{ calendar_id }}">
         <input type="hidden" name="giorni" value="{{ giorni }}">
+        <input type="hidden" name="gestore_id" value="{{ gestore_id_import or '' }}">
 
         {% macro select_sala(field_name, selected_id) %}
         <select name="{{ field_name }}" class="form-control">
@@ -47,12 +57,21 @@
         </select>
         {% endmacro %}
 
+        {% macro select_genere(field_name, selected_id) %}
+        <select name="{{ field_name }}" class="form-control">
+            <option value="">-- Nessuno --</option>
+            {% for g in generi_disponibili %}
+            <option value="{{ g.id }}" {% if g.id == selected_id %}selected{% endif %}>{{ g.nome }}</option>
+            {% endfor %}
+        </select>
+        {% endmacro %}
+
         {# ---------------- EVENTI NUOVI ---------------- #}
         <div class="prenotazioni-list">
             <h3>🆕 Eventi nuovi ({{ righe_nuovi|length }})</h3>
             {% if righe_nuovi %}
             <table class="table">
-                <thead><tr><th>Nome</th><th>Data</th><th>Ora</th><th>Durata</th><th>Sala destinazione</th><th>Azione</th></tr></thead>
+                <thead><tr><th>Nome</th><th>Data</th><th>Ora</th><th>Durata</th><th>Sala destinazione</th><th>Genere</th><th>Azione</th></tr></thead>
                 <tbody>
                     {% for r in righe_nuovi %}
                     <tr>
@@ -69,6 +88,7 @@
                         <td>{{ r.ora_inizio.strftime('%H:%M') }}</td>
                         <td>{{ r.durata }} min</td>
                         <td>{{ select_sala('sala__' ~ r.google_event_id, r.sala_suggerita) }}</td>
+                        <td>{{ select_genere('genere__' ~ r.google_event_id, None) }}</td>
                         <td>
                             <select name="azione__{{ r.google_event_id }}" class="form-control">
                                 <option value="ignora" selected>Ignora</option>
@@ -87,7 +107,7 @@
             <h3>✏️ Eventi già importati, modificati su Google ({{ righe_modificati|length }})</h3>
             {% if righe_modificati %}
             <table class="table">
-                <thead><tr><th>Nome</th><th>Differenze rilevate</th><th>Sala</th><th>Azione</th></tr></thead>
+                <thead><tr><th>Nome</th><th>Differenze rilevate</th><th>Sala</th><th>Genere</th><th>Azione</th></tr></thead>
                 <tbody>
                     {% for r in righe_modificati %}
                     <tr>
@@ -110,6 +130,7 @@
                             </ul>
                         </td>
                         <td>{{ select_sala('sala__' ~ r.google_event_id, r.sala_attuale_id) }}</td>
+                        <td>{{ select_genere('genere__' ~ r.google_event_id, r.genere_attuale_id) }}</td>
                         <td>
                             <select name="azione__{{ r.google_event_id }}" class="form-control">
                                 <option value="ignora">Ignora</option>
@@ -130,7 +151,7 @@
             <h3>✅ Eventi già importati, invariati ({{ righe_invariati|length }})</h3>
             {% if righe_invariati %}
             <table class="table">
-                <thead><tr><th>Nome</th><th>Data</th><th>Ora</th><th>Sala</th><th>Azione</th></tr></thead>
+                <thead><tr><th>Nome</th><th>Data</th><th>Ora</th><th>Sala</th><th>Genere</th><th>Azione</th></tr></thead>
                 <tbody>
                     {% for r in righe_invariati %}
                     <tr>
@@ -147,6 +168,7 @@
                         <td>{{ r.data_evento.strftime('%d/%m/%Y') }}</td>
                         <td>{{ r.ora_inizio.strftime('%H:%M') }}</td>
                         <td>{{ select_sala('sala__' ~ r.google_event_id, r.sala_attuale_id) }}</td>
+                        <td>{{ select_genere('genere__' ~ r.google_event_id, r.genere_attuale_id) }}</td>
                         <td>
                             <select name="azione__{{ r.google_event_id }}" class="form-control">
                                 <option value="ignora" selected>Ignora</option>

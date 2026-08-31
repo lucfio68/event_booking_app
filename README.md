@@ -30,7 +30,7 @@ Repo: https://github.com/lucfio68/event_booking_app
 
 **Fase B considerata chiusa** salvo emergano errori durante il test conclusivo di Step 1-3 già consegnati.
 
-**Fase C — Gestore Evento e Generi per Gestore: 🔶 IN ANALISI**
+**Fase C — Gestore Evento e Generi per Gestore: ✅ COMPLETATA**
 - **Step 1 — Tabella Gestore (anagrafica + logo) e CRUD: ✅ COMPLETATO E TESTATO**
   Modello `Gestore` (solo `ragione_sociale` obbligatoria), logo salvato come blob nel DB (`logo`/`logo_mimetype`), servito da `/gestore/<id>/logo`. CRUD in `/admin/gestori*`, template `admin_gestori.html`. Upload validato: max 2 MB, formati PNG/JPG/GIF/WEBP/SVG.
 - **Step 2 — GenereEvento aggiornato (gestore_id, logo, descrizione aggiuntiva) e CRUD: ✅ IMPLEMENTATO, DA TESTARE**
@@ -42,11 +42,14 @@ Repo: https://github.com/lucfio68/event_booking_app
 - **Step 4 — Creazione evento a cascata (Sala → Gestore → Genere filtrato con logo): ✅ IMPLEMENTATO, DA TESTARE**
   `Evento` guadagna `gestore_id` (nullable, tracciabilità). In `event_create.html`: scegliendo la Sala si precompila il suo Gestore di default (sempre cambiabile); il menu Genere si filtra via JS in base al Gestore scelto (generi senza gestore se il Gestore è vuoto, altrimenti solo quelli di quel Gestore); se il genere selezionato ha un logo, viene mostrata un'anteprima. Aggiornata anche la pagina "Gestione Evento" (`admin_view.html`) per mostrare Gestore/Genere/logo nell'intestazione.
   **Da fare prima del primo test**: visitare `/admin/migrate-evento-gestore?key=<MIGRATION_SECRET>`.
-- **Step 5 — Import Google Calendar con campo Gestore: ⬜ DA FARE**
+- **Step 5 — Import Google Calendar con campo Gestore: ✅ IMPLEMENTATO, DA TESTARE**
+  Il form di import guadagna un campo **Gestore** (facoltativo) da scegliere insieme a calendario/giorni prima della ricerca. Una volta scelto, ogni riga di Nuovi/Modificati/Invariati mostra una select **Genere** filtrata su quel Gestore (generi senza gestore se il campo è vuoto). Per le righe già importate, il Genere attuale viene precompilato in automatico. `_crea_evento_da_import` ora accetta `gestore_id`/`genere_evento_id_scelto`; l'azione "Aggiorna" aggiorna anche questi due campi sull'evento esistente. Nessuna migrazione aggiuntiva necessaria (riusa le colonne già create negli step precedenti).
 
 Dettaglio di ciascuno step, decisioni e punti aperti nella sezione dedicata più sotto.
 
-**Fase D — Stampe e Check-in con QR Code: 🔶 IN ANALISI** (rinominata da Fase C il 28 agosto 2026, ora in coda alla Fase C sul Gestore Evento)
+**Fase C considerata chiusa** salvo emergano errori durante il test conclusivo di Step 2-5 già consegnati.
+
+**Fase D — Stampe e Check-in con QR Code: 🔶 IN ANALISI** (rinominata da Fase C il 28 agosto 2026, ora a seguire della Fase C sul Gestore Evento appena completata)
 - **Step 1 — Generazione PDF A3 (mappa posti + elenco prenotazioni): ⬜ DA FARE**
 - **Step 2 — QR code sul biglietto (token firmato, invio con l'email di conferma): ⬜ DA FARE**
 - **Step 3 — Pagina di check-in per admin da telefono: ⬜ DA FARE**
@@ -192,6 +195,8 @@ https://raw.githubusercontent.com/lucfio68/event_booking_app/main/app.py
 
 ## Changelog Fase B (versioning delle modifiche)
 
+- **28 agosto 2026** — Fase C, Step 5 implementato (Fase C completata): import Google Calendar con campo Gestore facoltativo + selezione Genere per riga, filtrata sul Gestore scelto.
+- **28 agosto 2026** — Gestione Evento (`admin_view.html`): intestazione Gestore/Genere con loghi spostata sopra il titolo, loghi ingranditi (48px), ricerche prenotazioni/posti riallineate a destra su desktop.
 - **28 agosto 2026** — Fase C, Step 4 implementato: `Evento.gestore_id`, creazione evento a cascata (Sala→Gestore→Genere filtrato, con logo), aggiornata "Gestione Evento", migrazione `/admin/migrate-evento-gestore`.
 - **28 agosto 2026** — Fase C, Step 3 implementato: `Sala.gestore_default_id` (nullable), form/tabella "Gestione Sale" aggiornati, migrazione `/admin/migrate-sala-gestore`. Ordinamento "Gestione Generi Evento" per Gestore poi Genere.
 - **28 agosto 2026** — Fase C, Step 2 implementato: `GenereEvento` con `gestore_id`/logo/descrizione aggiuntiva, CRUD con supporto modifica, migrazione `/admin/migrate-generi-gestore`.

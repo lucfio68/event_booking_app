@@ -2846,7 +2846,7 @@ def _crea_posti_griglia(evento):
     db.session.add_all(posti_bulk)
 
 
-def _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, google_event_id):
+def _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, google_event_id, gestore_id=None, genere_evento_id_scelto=None):
     """Crea un nuovo Evento prenotabile a partire da un evento Google importato,
     usando il layout di default della sala scelta. Ritorna (evento, None) oppure
     (None, messaggio_errore) se la sala non ha un layout di default idoneo."""
@@ -2860,12 +2860,17 @@ def _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata
     if posti_max > limite:
         return None, f'il layout di default ({posti_max} posti) supera la capacità della sala ({limite})'
 
+    # Genere: quello scelto esplicitamente nell'import ha priorità; altrimenti
+    # resta il comportamento precedente (genere collegato al layout di default).
+    genere_finale = genere_evento_id_scelto if genere_evento_id_scelto is not None else layout.genere_evento_id
+
     evento = Evento(
         nome=nome, descrizione=descrizione, data_evento=data_obj, ora_inizio=ora_obj,
         durata=durata, posti_max=posti_max, file=layout.file, colonne=layout.colonne,
         corridoio_colonne=layout.corridoio_colonne, corridoio_file=layout.corridoio_file,
         sala_id=sala_id, creato_da=current_user.id,
-        layout_posti_id=layout.id, genere_evento_id=layout.genere_evento_id,
+        layout_posti_id=layout.id, genere_evento_id=genere_finale,
+        gestore_id=gestore_id,
         overbooking_abilitato=layout.overbooking_abilitato,
         origine='google', google_event_id=google_event_id,
         google_calendar_id_origine=calendar_id if google_event_id else None,
@@ -2943,8 +2948,14 @@ def admin_google_import():
     except (TypeError, ValueError):
         giorni = 60
     giorni = max(1, min(giorni, 365))
+    gestore_id_import = request.args.get('gestore_id', type=int) or None
 
     sale = Sala.query.order_by(Sala.nome).all()
+    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
+    if gestore_id_import:
+        generi_disponibili = GenereEvento.query.filter_by(gestore_id=gestore_id_import).order_by(GenereEvento.nome).all()
+    else:
+        generi_disponibili = GenereEvento.query.filter_by(gestore_id=None).order_by(GenereEvento.nome).all()
     righe_nuovi, righe_modificati, righe_invariati = [], [], []
     righe_non_importabili, righe_cancellati = [], []
     errore_import = None
@@ -2993,6 +3004,7 @@ def admin_google_import():
                     riga['evento_id'] = matched.id
                     riga['sala_attuale'] = matched.sala.nome
                     riga['sala_attuale_id'] = matched.sala_id
+                    riga['genere_attuale_id'] = matched.genere_evento_id
                     riga['ha_prenotazioni'] = len(matched.prenotazioni) > 0
 
                     (righe_modificati if differenze else righe_invariati).append(riga)
@@ -3027,6 +3039,7 @@ def admin_google_import():
         'admin_google_import.html',
         calendari=calendari, errore_calendari=errore_calendari,
         calendar_id=calendar_id, giorni=giorni, sale=sale,
+        gestori=gestori, gestore_id_import=gestore_id_import, generi_disponibili=generi_disponibili,
         righe_nuovi=righe_nuovi, righe_modificati=righe_modificati,
         righe_invariati=righe_invariati, righe_non_importabili=righe_non_importabili,
         righe_cancellati=righe_cancellati, errore_import=errore_import,
@@ -3041,6 +3054,7 @@ def admin_google_import_applica():
 
     calendar_id = request.form.get('calendar_id', '').strip()
     giorni = request.form.get('giorni', type=int) or 60
+    gestore_id_import = request.form.get('gestore_id', type=int) or None
     gids = request.form.getlist('gid')
 
     contatori = {'importati': 0, 'aggiornati': 0, 'sostituiti': 0, 'mantenuti_entrambi': 0, 'ignorati': 0, 'errori': 0}
@@ -3058,6 +3072,7 @@ def admin_google_import_applica():
         durata = request.form.get(f'durata__{gid}', type=int)
         sala_id = request.form.get(f'sala__{gid}', type=int)
         evento_id_esistente = request.form.get(f'evento_id__{gid}', type=int)
+        genere_scelto = request.form.get(f'genere__{gid}', type=int) or None
 
         try:
             data_obj = datetime.strptime(data_str, '%Y-%m-%d').date()
@@ -3084,6 +3099,8 @@ def admin_google_import_applica():
             evento.ora_inizio = ora_obj
             evento.durata = durata
             evento.sala_id = sala_id
+            evento.gestore_id = gestore_id_import
+            evento.genere_evento_id = genere_scelto
             evento.google_updated = datetime.utcnow()
             contatori['aggiornati'] += 1
 
@@ -3092,7 +3109,10 @@ def admin_google_import_applica():
             if evento_vecchio:
                 db.session.delete(evento_vecchio)
                 db.session.flush()
-            _, errore = _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, gid)
+            _, errore = _crea_evento_da_import(
+                sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, gid,
+                gestore_id=gestore_id_import, genere_evento_id_scelto=genere_scelto
+            )
             if errore:
                 contatori['errori'] += 1
                 flash(f'Riga "{nome}": {errore}, impossibile creare l\'evento.', 'danger')
@@ -3100,7 +3120,10 @@ def admin_google_import_applica():
             contatori['sostituiti'] += 1
 
         elif azione == 'importa_nuovo':
-            _, errore = _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, gid)
+            _, errore = _crea_evento_da_import(
+                sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, gid,
+                gestore_id=gestore_id_import, genere_evento_id_scelto=genere_scelto
+            )
             if errore:
                 contatori['errori'] += 1
                 flash(f'Riga "{nome}": {errore}, impossibile creare l\'evento.', 'danger')
@@ -3110,7 +3133,10 @@ def admin_google_import_applica():
         elif azione == 'mantieni_entrambi':
             # Evento aggiuntivo separato, SENZA google_event_id: l'evento originale
             # resta l'unico collegato a questo id Google nei futuri import.
-            _, errore = _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, None)
+            _, errore = _crea_evento_da_import(
+                sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, None,
+                gestore_id=gestore_id_import, genere_evento_id_scelto=genere_scelto
+            )
             if errore:
                 contatori['errori'] += 1
                 flash(f'Riga "{nome}": {errore}, impossibile creare l\'evento.', 'danger')
@@ -3136,7 +3162,7 @@ def admin_google_import_applica():
         f"ignorati: {contatori['ignorati']}" + (f", errori: {contatori['errori']}" if contatori['errori'] else "")
     )
     flash(riepilogo, 'success' if not contatori['errori'] else 'warning')
-    return redirect(url_for('admin_google_import', calendar_id=calendar_id, giorni=giorni))
+    return redirect(url_for('admin_google_import', calendar_id=calendar_id, giorni=giorni, gestore_id=gestore_id_import))
 
 
 if __name__ == '__main__':

@@ -1508,8 +1508,8 @@ source venv/bin/activate    (Linux/Mac)</pre>
     <div class="step">
         <div class="step-num">2</div>
         <div class="step-content">
-            <h4>Scegli calendario e periodo</h4>
-            <p>Seleziona il <strong>calendario sorgente</strong> (uno qualsiasi tra quelli visibili dall'account collegato, non necessariamente quello associato a una sala) e il numero di giorni da "oggi" da esplorare. Clicca <strong>🔍 Cerca eventi</strong>.</p>
+            <h4>Scegli calendario, periodo e Gestore</h4>
+            <p>Seleziona il <strong>calendario sorgente</strong> (uno qualsiasi tra quelli visibili dall'account collegato, non necessariamente quello associato a una sala), il numero di giorni da "oggi" da esplorare, e facoltativamente un <a href="#admin-gestori">Gestore</a>: se lo scegli, ogni riga dell'anteprima potrà avere un Genere assegnato tra quelli di quel Gestore (se lasci "-- Nessuno --", vedrai i generi "generici" senza gestore). Clicca <strong>🔍 Cerca eventi</strong>.</p>
         </div>
     </div>
     <div class="step">
@@ -1518,8 +1518,8 @@ source venv/bin/activate    (Linux/Mac)</pre>
             <h4>Rivedi l'anteprima</h4>
             <p>Gli eventi trovati vengono divisi in sezioni:</p>
             <ul>
-                <li><strong>🆕 Nuovi</strong>: non ancora presenti in EventBooking. Scegli la sala di destinazione e l'azione <em>Importa come nuovo</em> (o lascia <em>Ignora</em> per saltarli).</li>
-                <li><strong>✏️ Modificati</strong>: importati in precedenza, ma con nome/data/ora/durata cambiati su Google — vengono mostrate le differenze campo per campo. Puoi scegliere <em>Aggiorna</em> (aggiorna i dati mantenendo posti e prenotazioni esistenti), <em>Sostituisci</em> (ricrea l'evento da zero: <strong>le prenotazioni esistenti su quell'evento andranno perse</strong>), <em>Mantieni entrambi</em> (lascia l'evento esistente com'è e ne crea uno nuovo separato) oppure <em>Ignora</em>.</li>
+                <li><strong>🆕 Nuovi</strong>: non ancora presenti in EventBooking. Scegli la sala di destinazione, facoltativamente un Genere (tra quelli del Gestore scelto al passo 2), e l'azione <em>Importa come nuovo</em> (o lascia <em>Ignora</em> per saltarli).</li>
+                <li><strong>✏️ Modificati</strong>: importati in precedenza, ma con nome/data/ora/durata cambiati su Google — vengono mostrate le differenze campo per campo. Il Genere mostrato è già precompilato con quello attualmente assegnato all'evento. Puoi scegliere <em>Aggiorna</em> (aggiorna i dati, incluso il Genere, mantenendo posti e prenotazioni esistenti), <em>Sostituisci</em> (ricrea l'evento da zero: <strong>le prenotazioni esistenti su quell'evento andranno perse</strong>), <em>Mantieni entrambi</em> (lascia l'evento esistente com'è e ne crea uno nuovo separato) oppure <em>Ignora</em>.</li>
                 <li><strong>✅ Invariati</strong>: già importati e identici a Google, nessuna azione necessaria (default <em>Ignora</em>).</li>
                 <li><strong>⚠️ Non importabili</strong>: eventi "intera giornata" (senza un orario preciso) — non supportati in questa versione.</li>
                 <li><strong>🗑️ Rimossi dal calendario Google</strong>: eventi importati in precedenza che non compaiono più tra i risultati (probabilmente cancellati su Google). Puoi <em>Ignorare</em>, <em>Segnare come annullato</em> (l'evento sparisce dal calendario prenotabile per tutti ma resta nel database con le sue prenotazioni, utile per contattare i partecipanti) oppure <em>Eliminare definitivamente</em> (cancella anche le prenotazioni, irreversibile).</li>
@@ -1850,6 +1850,12 @@ source venv/bin/activate    (Linux/Mac)</pre>
 {% if current_user.is_admin() %}
 <div class="section" id="changelog">
     <h2>📝 6. Changelog</h2>
+
+    <h3>v2.1 (2026)</h3>
+    <ul>
+        <li><strong>Nuovo:</strong> Import Google Calendar (3.17) — campo Gestore facoltativo nel form di ricerca; ogni riga dell'anteprima (Nuovi/Modificati/Invariati) può avere un Genere assegnato, filtrato sul Gestore scelto</li>
+        <li><strong>Nuovo:</strong> Gestione Evento — intestazione con logo Gestore e Genere spostata sopra il titolo, loghi ingranditi; caselle di ricerca (prenotazioni e posti) riallineate a destra su desktop</li>
+    </ul>
 
     <h3>v2.0 (2026)</h3>
     <ul>
