@@ -1,42 +1,75 @@
 {% extends "base.html" %}
 {% block title %}Gestione Evento - {{ evento.nome }}{% endblock %}
 {% block content %}
+<style>
+    /* Ricerca compatta: a schermo intero su mobile, allineata a destra su desktop */
+    .search-box-compact { width: 100%; }
+    .search-box-compact .search-buttons-row { display: flex; gap: 8px; margin-top: 6px; justify-content: flex-start; align-items: center; }
+    @media (min-width: 769px) {
+        .search-box-compact { max-width: 320px; margin-left: auto; }
+        .search-box-compact .search-buttons-row { justify-content: flex-end; }
+        .evento-header-row { align-items: flex-start !important; }
+        .evento-header-actions { align-items: flex-end !important; }
+    }
+</style>
 <div class="admin-container">
-    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
+
+    {% if evento.gestore or evento.genere %}
+    <div class="evento-org-header" style="display:flex; align-items:center; gap:24px; flex-wrap:wrap; margin-bottom:14px; padding-bottom:14px; border-bottom:1px solid #e0e0e0;">
+        {% if evento.gestore %}
+        <div style="display:flex; align-items:center; gap:10px;">
+            {% if evento.gestore.logo %}
+            <img src="{{ url_for('logo_gestore', gestore_id=evento.gestore.id) }}" alt="Logo gestore" style="height:48px; max-width:180px; object-fit:contain;">
+            {% endif %}
+            <span style="font-weight:600; color:#2c3e50; font-size:1.05em;">{{ evento.gestore.ragione_sociale }}</span>
+        </div>
+        {% endif %}
+        {% if evento.genere %}
+        <div style="display:flex; align-items:center; gap:10px;">
+            {% if evento.genere.logo %}
+            <img src="{{ url_for('logo_genere', genere_id=evento.genere.id) }}" alt="Logo genere" style="height:48px; max-width:180px; object-fit:contain;">
+            {% endif %}
+            <span style="font-weight:500; color:#555;">{{ evento.genere.nome }}</span>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="evento-header-row" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
         <div>
             <h2>Gestione Evento: {{ evento.nome }}</h2>
-            <p><strong>Data:</strong> {{ evento.data_evento.strftime('%d/%m/%Y') }} | <strong>Sala:</strong> {{ evento.sala.nome }}
-                {% if evento.gestore or evento.genere %} | <strong>Gestore:</strong> {{ evento.gestore.ragione_sociale if evento.gestore else '-' }}
-                | <strong>Genere:</strong> {{ evento.genere.nome if evento.genere else '-' }}
-                {% if evento.genere and evento.genere.logo %}
-                <img src="{{ url_for('logo_genere', genere_id=evento.genere.id) }}" alt="Logo genere" style="height:22px; vertical-align:middle; margin-left:4px;">
-                {% endif %}
-                {% endif %}
-            </p>
+            <p><strong>Data:</strong> {{ evento.data_evento.strftime('%d/%m/%Y') }} | <strong>Sala:</strong> {{ evento.sala.nome }}</p>
         </div>
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-            <a href="{{ url_for('admin_evento_layout', event_id=evento.id) }}" class="btn btn-secondary">🔧 Modifica Layout</a>
-            <button id="btnDeleteEvent" data-event-id="{{ evento.id }}" data-event-name="{{ evento.nome }}" class="btn btn-danger" style="background:#dc2626;">
-                🗑️ Elimina Evento
-            </button>
+        <div class="evento-header-actions" style="display:flex; flex-direction:column; align-items:flex-start; gap:10px; width:100%; max-width:320px;">
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <a href="{{ url_for('admin_evento_layout', event_id=evento.id) }}" class="btn btn-secondary">🔧 Modifica Layout</a>
+                <button id="btnDeleteEvent" data-event-id="{{ evento.id }}" data-event-name="{{ evento.nome }}" class="btn btn-danger" style="background:#dc2626;">
+                    🗑️ Elimina Evento
+                </button>
+            </div>
+            <div class="search-box search-box-compact">
+                <form method="GET" action="{{ url_for('admin_event_view', event_id=evento.id) }}">
+                    <input type="text" name="search" value="{{ search }}" placeholder="Cerca per nome o email..." class="form-control">
+                    <div class="search-buttons-row">
+                        <button type="submit" class="btn btn-primary btn-sm">Cerca</button>
+                        <a href="{{ url_for('admin_event_view', event_id=evento.id) }}" class="btn btn-secondary btn-sm">Reset</a>
+                    </div>
+                </form>
+            </div>
         </div>
-    </div>
-
-    <div class="search-box">
-        <form method="GET" action="{{ url_for('admin_event_view', event_id=evento.id) }}">
-            <input type="text" name="search" value="{{ search }}" placeholder="Cerca per nome o email..." class="form-control">
-            <button type="submit" class="btn btn-primary">Cerca</button>
-            <a href="{{ url_for('admin_event_view', event_id=evento.id) }}" class="btn btn-secondary">Reset</a>
-        </form>
     </div>
 
     <div class="seats-layout-admin">
-        <h3>Layout Sala</h3>
-        <div class="search-box" style="margin-bottom:15px; display:flex; gap:10px; align-items:center;">
-            <input type="text" id="seatSearchInput" placeholder="Cerca posti per nome, email, username..." class="form-control" style="max-width:400px;">
-            <button onclick="searchSeats()" class="btn btn-primary">Cerca</button>
-            <button onclick="clearSeatSearch()" class="btn btn-secondary">Reset</button>
-            <span id="seatSearchResults" style="color:#666; font-size:0.9em;"></span>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px; margin-bottom:10px;">
+            <h3 style="margin:0;">Layout Sala</h3>
+            <div class="search-box search-box-compact">
+                <input type="text" id="seatSearchInput" placeholder="Cerca posti per nome, email, username..." class="form-control">
+                <div class="search-buttons-row">
+                    <span id="seatSearchResults" style="color:#666; font-size:0.85em; margin-right:auto;"></span>
+                    <button onclick="searchSeats()" class="btn btn-primary btn-sm">Cerca</button>
+                    <button onclick="clearSeatSearch()" class="btn btn-secondary btn-sm">Reset</button>
+                </div>
+            </div>
         </div>
         <div id="adminSeatsContainer" class="seats-container">
             <p>Caricamento posti...</p>
