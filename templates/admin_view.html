@@ -4,10 +4,8 @@
 <style>
     /* Ricerca compatta: a schermo intero su mobile, allineata a destra su desktop */
     .search-box-compact { width: 100%; }
-    .search-box-compact .search-buttons-row { display: flex; gap: 8px; margin-top: 6px; justify-content: flex-start; align-items: center; }
     @media (min-width: 769px) {
-        .search-box-compact { max-width: 320px; margin-left: auto; }
-        .search-box-compact .search-buttons-row { justify-content: flex-end; }
+        .search-box-compact { max-width: 380px; margin-left: auto; }
         .evento-header-row { align-items: flex-start !important; }
         .evento-header-actions { align-items: flex-end !important; }
     }
@@ -47,13 +45,11 @@
                     🗑️ Elimina Evento
                 </button>
             </div>
-            <div class="search-box search-box-compact">
-                <form method="GET" action="{{ url_for('admin_event_view', event_id=evento.id) }}">
-                    <input type="text" name="search" value="{{ search }}" placeholder="Cerca per nome o email..." class="form-control">
-                    <div class="search-buttons-row">
-                        <button type="submit" class="btn btn-primary btn-sm">Cerca</button>
-                        <a href="{{ url_for('admin_event_view', event_id=evento.id) }}" class="btn btn-secondary btn-sm">Reset</a>
-                    </div>
+            <div class="search-box search-box-compact" style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+                <form method="GET" action="{{ url_for('admin_event_view', event_id=evento.id) }}" style="display:flex; align-items:center; flex-wrap:wrap; gap:8px; width:100%;">
+                    <input type="text" name="search" value="{{ search }}" placeholder="Cerca per nome o email..." class="form-control" style="flex:1; min-width:160px;">
+                    <button type="submit" class="btn btn-primary btn-sm">Cerca</button>
+                    <a href="{{ url_for('admin_event_view', event_id=evento.id) }}" class="btn btn-secondary btn-sm">Reset</a>
                 </form>
             </div>
         </div>
@@ -62,13 +58,11 @@
     <div class="seats-layout-admin">
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px; margin-bottom:10px;">
             <h3 style="margin:0;">Layout Sala</h3>
-            <div class="search-box search-box-compact">
-                <input type="text" id="seatSearchInput" placeholder="Cerca posti per nome, email, username..." class="form-control">
-                <div class="search-buttons-row">
-                    <span id="seatSearchResults" style="color:#666; font-size:0.85em; margin-right:auto;"></span>
-                    <button onclick="searchSeats()" class="btn btn-primary btn-sm">Cerca</button>
-                    <button onclick="clearSeatSearch()" class="btn btn-secondary btn-sm">Reset</button>
-                </div>
+            <div class="search-box search-box-compact" style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+                <input type="text" id="seatSearchInput" placeholder="Cerca posti per nome, email, username..." class="form-control" style="flex:1; min-width:160px;">
+                <button onclick="searchSeats()" class="btn btn-primary btn-sm">Cerca</button>
+                <button onclick="clearSeatSearch()" class="btn btn-secondary btn-sm">Reset</button>
+                <span id="seatSearchResults" style="color:#666; font-size:0.85em; width:100%;"></span>
             </div>
         </div>
         <div id="adminSeatsContainer" class="seats-container">
