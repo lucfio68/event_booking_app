@@ -17,7 +17,10 @@ class Utente(db.Model, UserMixin):
     tipo = db.Column(db.String(20), default='user')  # admin, user
     data_registrazione = db.Column(db.DateTime, default=datetime.utcnow)
 
-    prenotazioni = db.relationship('Prenotazione', backref='utente', lazy=True, cascade='all, delete-orphan', foreign_keys='Prenotazione.utente_id')
+    prenotazioni = db.relationship(
+        'Prenotazione', backref='utente', lazy=True, cascade='all, delete-orphan',
+        foreign_keys='Prenotazione.utente_id'  # Fase D: esplicita la FK, altrimenti ambigua con check_in_da
+    )
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)

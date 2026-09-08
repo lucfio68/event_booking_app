@@ -39,9 +39,6 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 }
 
 db.init_app(app)
-with app.app_context():
-    db.create_all()
-    _run_startup_migrations()
 mail = Mail(app)
 
 # ==================== EMAIL FALLBACK (SMTP → Resend API) ====================
@@ -2246,7 +2243,45 @@ def admin_sale_delete(sala_id):
 def guida():
     return render_template('guida_event_booking.html')
 
+# ==================== MIGRAZIONI AUTOMATICHE ALL'AVVIO ====================
+# Eseguite una volta all'avvio del worker (idempotenti: verificano se la
+# colonna esiste prima di aggiungerla). Usano solo inspector + SQL DDL, NON
+# richiedono i mapper ORM, quindi funzionano anche quando il login sarebbe
+# rotto (chicken-and-egg delle migrazioni via route admin). Gli errori vengono
+# loggati senza bloccare l'avvio dell'applicazione.
+
+def _run_startup_migrations():
+    try:
+        inspector = inspect(db.engine)
+
+        # Fase D - Step 1: colonne di check-in su 'prenotazione'
+        if 'prenotazione' in inspector.get_table_names():
+            cols = {c['name'] for c in inspector.get_columns('prenotazione')}
+            if 'presente' not in cols:
+                db.session.execute(text(
+                    "ALTER TABLE prenotazione ADD COLUMN presente BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
+                app.logger.info('startup-migration: aggiunta prenotazione.presente')
+            if 'check_in_at' not in cols:
+                db.session.execute(text(
+                    "ALTER TABLE prenotazione ADD COLUMN check_in_at TIMESTAMP"
+                ))
+                app.logger.info('startup-migration: aggiunta prenotazione.check_in_at')
+            if 'check_in_da' not in cols:
+                db.session.execute(text(
+                    "ALTER TABLE prenotazione ADD COLUMN check_in_da INTEGER REFERENCES utente(id)"
+                ))
+                app.logger.info('startup-migration: aggiunta prenotazione.check_in_da')
+
+        db.session.commit()
+        app.logger.info("Migrazioni di avvio completate (o gia' presenti).")
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f'Migrazioni di avvio fallite: {e}')
+
+
 # ==================== INIT DB ====================
+
 
 @app.route('/init-db')
 @login_required
@@ -2547,37 +2582,6 @@ def migrate_sala_gestore():
         db.session.rollback()
         return f"❌ Errore durante la migrazione: {str(e)}", 500
 
-# ==================== MIGRAZIONI AUTOMATICHE ALL'AVVIO ====================
-# Vengono eseguite UNA volta all'avvio del worker (idempotenti: verificano
-# prima se la colonna esiste). Si usano solo inspector + SQL DDL, quindi NON
-# richiedono la configurazione dei mapper ORM e funzionano anche quando il
-# login sarebbe rotto. L'errore viene loggato senza bloccare l'avvio.
-
-def _run_startup_migrations():
-    try:
-        inspector = inspect(db.engine)
-
-        # Fase D - Step 1: check-in su prenotazione
-        if 'prenotazione' in inspector.get_table_names():
-            cols = {c['name'] for c in inspector.get_columns('prenotazione')}
-            if 'presente' not in cols:
-                db.session.execute(text(
-                    "ALTER TABLE prenotazione ADD COLUMN presente BOOLEAN NOT NULL DEFAULT FALSE"
-                ))
-            if 'check_in_at' not in cols:
-                db.session.execute(text(
-                    "ALTER TABLE prenotazione ADD COLUMN check_in_at TIMESTAMP"
-                ))
-            if 'check_in_da' not in cols:
-                db.session.execute(text(
-                    "ALTER TABLE prenotazione ADD COLUMN check_in_da INTEGER REFERENCES utente(id)"
-                ))
-
-        db.session.commit()
-        app.logger.info('Migrazioni di avvio completate (o già presenti).')
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f'Migrazioni di avvio fallite: {e}')
 
 # ==================== FASE B - GOOGLE CALENDAR: CONNESSIONE OAUTH ====================
 #
@@ -3408,6 +3412,12 @@ def stampa_evento_pdf(event_id):
         buffer.read(), mimetype='application/pdf',
         headers={'Content-Disposition': f'inline; filename="{filename}"'}
     )
+
+
+# Migrazioni idempotenti eseguite all'avvio del worker (prima di servire richieste).
+with app.app_context():
+    db.create_all()
+    _run_startup_migrations()
 
 
 if __name__ == '__main__':
