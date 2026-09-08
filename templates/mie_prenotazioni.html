@@ -24,7 +24,10 @@
                     <td>{{ v.evento.ora_inizio.strftime('%H:%M') }}</td>
                     <td>{{ v.sala.nome }}</td>
                     <td>{{ v.posti_label }}</td>
-                    <td><span class="badge">{{ v.prenotazione.stato }}</span></td>
+                    <td>
+                        <span class="badge">{{ v.prenotazione.stato }}</span>
+                        {% if v.prenotazione.presente %}<br><span class="badge" style="background:#27ae60; color:#fff;">✓ Check-in effettuato</span>{% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -39,7 +42,7 @@
         {% if passate %}
         <table class="table">
             <thead>
-                <tr><th>Evento</th><th>Data</th><th>Ora</th><th>Sala</th><th>Posti</th></tr>
+                <tr><th>Evento</th><th>Data</th><th>Ora</th><th>Sala</th><th>Posti</th><th>Presenza</th></tr>
             </thead>
             <tbody>
                 {% for v in passate %}
@@ -49,6 +52,13 @@
                     <td>{{ v.evento.ora_inizio.strftime('%H:%M') }}</td>
                     <td>{{ v.sala.nome }}</td>
                     <td>{{ v.posti_label }}</td>
+                    <td>
+                        {% if v.prenotazione.presente %}
+                        <span class="badge" style="background:#27ae60; color:#fff;">✓ Presente</span>
+                        {% else %}
+                        <span class="text-muted" style="font-size:0.85em;">Non risulta check-in</span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>

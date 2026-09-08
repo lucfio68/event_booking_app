@@ -41,6 +41,7 @@
         <div class="evento-header-actions" style="display:flex; flex-direction:column; align-items:flex-start; gap:10px; width:100%; max-width:320px;">
             <div style="display:flex; gap:10px; flex-wrap:wrap;">
                 <a href="{{ url_for('admin_evento_layout', event_id=evento.id) }}" class="btn btn-secondary">🔧 Modifica Layout</a>
+                <a href="{{ url_for('stampa_evento_pdf', event_id=evento.id) }}" target="_blank" class="btn btn-secondary">🖨️ Stampa PDF</a>
                 <button id="btnDeleteEvent" data-event-id="{{ evento.id }}" data-event-name="{{ evento.nome }}" class="btn btn-danger" style="background:#dc2626;">
                     🗑️ Elimina Evento
                 </button>
@@ -81,17 +82,26 @@
                     <th>Email</th>
                     <th>Data Prenotazione</th>
                     <th>Posti</th>
+                    <th>Presente</th>
                     <th>Azioni</th>
                 </tr>
             </thead>
             <tbody>
                 {% for p in prenotazioni %}
-                <tr>
+                <tr id="prenRow{{ p.id }}">
                     <td>{{ p.id }}</td>
                     <td>{{ p.utente.nome_cognome }}</td>
                     <td>{{ p.utente.email }}</td>
                     <td>{{ p.data_prenotazione.strftime('%d/%m/%Y %H:%M') }}</td>
                     <td>{{ p.posti|length }}</td>
+                    <td>
+                        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; margin:0;">
+                            <input type="checkbox" id="presenteCheck{{ p.id }}" {% if p.presente %}checked{% endif %} onchange="togglePresente({{ p.id }})">
+                            <span id="presenteLabel{{ p.id }}" style="font-size:0.85em; color:#666;">
+                                {% if p.presente and p.check_in_at %}dalle {{ p.check_in_at.strftime('%H:%M') }}{% endif %}
+                            </span>
+                        </label>
+                    </td>
                     <td><button class="btn btn-sm btn-info" onclick="viewPrenotazione({{ p.id }})">Dettagli</button></td>
                 </tr>
                 {% endfor %}
@@ -283,6 +293,38 @@ function viewPrenotazione(id) {
 
 function closeModal() {
     document.getElementById('prenotazioneModal').style.display = 'none';
+}
+
+function togglePresente(prenotazioneId) {
+    const checkbox = document.getElementById('presenteCheck' + prenotazioneId);
+    const label = document.getElementById('presenteLabel' + prenotazioneId);
+    checkbox.disabled = true;
+
+    fetch('/api/prenotazione/' + prenotazioneId + '/presente', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                alert('Errore: ' + data.error);
+                checkbox.checked = !checkbox.checked;
+                return;
+            }
+            checkbox.checked = data.presente;
+            if (data.presente) {
+                const ora = new Date();
+                const hh = String(ora.getHours()).padStart(2, '0');
+                const mm = String(ora.getMinutes()).padStart(2, '0');
+                label.textContent = 'dalle ' + hh + ':' + mm;
+            } else {
+                label.textContent = '';
+            }
+        })
+        .catch(function(e) {
+            alert('Errore di rete durante l\'aggiornamento della presenza.');
+            checkbox.checked = !checkbox.checked;
+        })
+        .finally(function() {
+            checkbox.disabled = false;
+        });
 }
 
 

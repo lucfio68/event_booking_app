@@ -1,5 +1,6 @@
 import os
 import re
+import io
 import threading
 import socket
 from datetime import datetime, date, timedelta
@@ -20,6 +21,10 @@ from cryptography.fernet import Fernet, InvalidToken
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build as google_build
+from reportlab.lib.pagesizes import A3, landscape
+from reportlab.lib.units import mm
+from reportlab.lib import colors
+from reportlab.pdfgen import canvas as pdfcanvas
 from googleapiclient.errors import HttpError as GoogleHttpError
 
 app = Flask(__name__)
@@ -1585,6 +1590,28 @@ def api_prenotazione_detail(prenotazione_id):
     })
 
 
+@app.route('/api/prenotazione/<int:prenotazione_id>/presente', methods=['POST'])
+@login_required
+def api_prenotazione_toggle_presente(prenotazione_id):
+    if not current_user.is_admin():
+        return jsonify({'error': 'Accesso negato'}), 403
+
+    pren = db.session.get(Prenotazione, prenotazione_id)
+    if not pren:
+        return jsonify({'error': 'Prenotazione non trovata'}), 404
+
+    pren.presente = not pren.presente
+    if pren.presente:
+        pren.check_in_at = datetime.utcnow()
+        pren.check_in_da = current_user.id
+    else:
+        pren.check_in_at = None
+        pren.check_in_da = None
+    db.session.commit()
+
+    return jsonify({'success': True, 'presente': pren.presente})
+
+
 # ==================== RICERCA POSTI (ADMIN) ====================
 
 @app.route('/api/seats/search/<int:event_id>')
@@ -2418,7 +2445,46 @@ def migrate_generi_gestore():
         return f"❌ Errore durante la migrazione: {str(e)}", 500
 
 
-# ==================== MIGRAZIONE EVENTO / GESTORE (Fase C, Step 4) ====================
+# ==================== MIGRAZIONE CHECK-IN PRENOTAZIONI (Fase D, Step 1) ====================
+# Aggiunge le colonne di check-in su 'prenotazione' (tabella già esistente e popolata).
+
+@app.route('/admin/migrate-prenotazione-checkin')
+@login_required
+def migrate_prenotazione_checkin():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    esiti, aggiunte = [], []
+
+    try:
+        inspector = inspect(db.engine)
+        colonne_esistenti = [col['name'] for col in inspector.get_columns('prenotazione')]
+
+        colonne_da_aggiungere = [
+            ('presente', "ALTER TABLE prenotazione ADD COLUMN presente BOOLEAN NOT NULL DEFAULT FALSE"),
+            ('check_in_at', "ALTER TABLE prenotazione ADD COLUMN check_in_at TIMESTAMP"),
+            ('check_in_da', "ALTER TABLE prenotazione ADD COLUMN check_in_da INTEGER REFERENCES utente(id)"),
+        ]
+
+        for nome_colonna, ddl in colonne_da_aggiungere:
+            if nome_colonna not in colonne_esistenti:
+                db.session.execute(text(ddl))
+                aggiunte.append(f'prenotazione.{nome_colonna}')
+            else:
+                esiti.append(f"prenotazione.{nome_colonna} esiste già")
+
+        if aggiunte:
+            db.session.commit()
+            return "✅ Migrazione completata!<br>Aggiunto: " + ', '.join(aggiunte) + "<br>" + '<br>'.join(esiti)
+        else:
+            return "ℹ️ Nessuna migrazione necessaria, colonne già presenti.<br>" + '<br>'.join(esiti)
+
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
 # Aggiunge la colonna gestore_id su 'evento' (tabella già esistente e popolata).
 
 @app.route('/admin/migrate-evento-gestore')
@@ -3163,6 +3229,151 @@ def admin_google_import_applica():
     )
     flash(riepilogo, 'success' if not contatori['errori'] else 'warning')
     return redirect(url_for('admin_google_import', calendar_id=calendar_id, giorni=giorni, gestore_id=gestore_id_import))
+
+
+
+# ==================== FASE D - STEP 1: STAMPA PDF A3 (MAPPA POSTI + PRENOTAZIONI) ====================
+#
+# Genera un PDF A3 orizzontale con 2 pagine: mappa posti (con il nome di chi ha
+# prenotato scritto su ogni posto occupato) ed elenco prenotazioni con una
+# casella da barrare a penna. Uso previsto: riferimento cartaceo in sala per
+# accompagnare le persone al proprio posto.
+
+def _parse_corridoi_pdf(valore):
+    if not valore:
+        return []
+    return [int(x.strip()) for x in valore.split(',') if x.strip().isdigit()]
+
+
+def _genera_pdf_evento(evento):
+    posti = (
+        Posto.query.filter_by(evento_id=evento.id)
+        .options(joinedload(Posto.prenotazione).joinedload(Prenotazione.utente))
+        .all()
+    )
+    posti_by_fc = {(p.fila, p.colonna): p for p in posti}
+
+    prenotazioni = (
+        Prenotazione.query.filter_by(evento_id=evento.id)
+        .options(joinedload(Prenotazione.utente), joinedload(Prenotazione.posti))
+        .order_by(Prenotazione.nome_prenotazione)
+        .all()
+    )
+
+    corr_col = _parse_corridoi_pdf(evento.corridoio_colonne)
+    corr_file = _parse_corridoi_pdf(evento.corridoio_file)
+
+    buffer = io.BytesIO()
+    page_size = landscape(A3)
+    width, height = page_size
+    c = pdfcanvas.Canvas(buffer, pagesize=page_size)
+
+    # ---------------- Pagina 1: mappa posti ----------------
+    c.setFont('Helvetica-Bold', 18)
+    c.drawString(15 * mm, height - 15 * mm, evento.nome)
+    c.setFont('Helvetica', 11)
+    intestazione = f"{evento.sala.nome} — {evento.data_evento.strftime('%d/%m/%Y')} {evento.ora_inizio.strftime('%H:%M')}"
+    if evento.gestore:
+        intestazione += f" — {evento.gestore.ragione_sociale}"
+    c.drawString(15 * mm, height - 22 * mm, intestazione)
+    c.setFont('Helvetica', 8)
+    c.drawString(15 * mm, height - 27 * mm, f"Stampato il {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+
+    margine_sx = 15 * mm
+    margine_top = 35 * mm
+    area_larghezza = width - 2 * margine_sx
+    area_altezza = height - margine_top - 15 * mm
+
+    colonne_visive = evento.colonne + len(corr_col)
+    file_visive = evento.file + len(corr_file)
+    cella_w = min(24 * mm, area_larghezza / max(colonne_visive, 1))
+    cella_h = min(16 * mm, area_altezza / max(file_visive, 1))
+
+    y = height - margine_top
+    for f in range(1, evento.file + 1):
+        fila_lettera = chr(64 + f)
+        x = margine_sx
+        for col in range(1, evento.colonne + 1):
+            posto = posti_by_fc.get((fila_lettera, col))
+            occupato = posto and posto.stato != 'libero' and posto.prenotazione_id
+            c.setFillColor(colors.HexColor('#dbeafe') if occupato else colors.white)
+            c.rect(x, y - cella_h, cella_w, cella_h, stroke=1, fill=1)
+            c.setFillColor(colors.black)
+            c.setFont('Helvetica', 8)
+            c.drawString(x + 1.5 * mm, y - 4.5 * mm, f"{fila_lettera}{col}")
+            if occupato:
+                nome = (posto.prenotazione.nome_prenotazione or posto.prenotazione.utente.nome_cognome or '')
+                c.setFont('Helvetica-Bold', 8)
+                c.drawString(x + 1.5 * mm, y - cella_h + 3 * mm, nome[:16])
+            x += cella_w
+            if col in corr_col:
+                x += cella_w * 0.4
+        y -= cella_h
+        if f in corr_file:
+            y -= cella_h * 0.4
+
+    c.showPage()
+
+    # ---------------- Pagina 2: elenco prenotazioni ----------------
+    c.setFont('Helvetica-Bold', 16)
+    c.drawString(15 * mm, height - 15 * mm, f"Elenco prenotazioni — {evento.nome}")
+    c.setFont('Helvetica', 9)
+    c.drawString(15 * mm, height - 21 * mm, f"{evento.sala.nome} — {evento.data_evento.strftime('%d/%m/%Y')} {evento.ora_inizio.strftime('%H:%M')} — {len(prenotazioni)} prenotazioni")
+
+    riga_h = 8 * mm
+    y = height - 32 * mm
+
+    def intestazione_tabella(y_pos):
+        c.setFont('Helvetica-Bold', 9)
+        c.drawString(15 * mm, y_pos, "Arrivo")
+        c.drawString(30 * mm, y_pos, "Nome")
+        c.drawString(110 * mm, y_pos, "Email / Cellulare")
+        c.drawString(200 * mm, y_pos, "Posti")
+        c.drawString(260 * mm, y_pos, "Check-in app")
+        c.line(15 * mm, y_pos - 2 * mm, width - 15 * mm, y_pos - 2 * mm)
+        return y_pos - riga_h
+
+    y = intestazione_tabella(y)
+    c.setFont('Helvetica', 9)
+    for p in prenotazioni:
+        if y < 20 * mm:
+            c.showPage()
+            y = height - 20 * mm
+            y = intestazione_tabella(y)
+            c.setFont('Helvetica', 9)
+
+        nome_display = p.nome_prenotazione or p.utente.nome_cognome
+        contatto = p.utente.email or p.utente.cellulare or ''
+        posti_str = ', '.join(sorted(f"{s.fila}{s.colonna}" for s in p.posti))
+
+        c.rect(15 * mm, y - 4 * mm, 6 * mm, 6 * mm)  # casella vuota da barrare a penna
+        c.drawString(30 * mm, y, nome_display[:38])
+        c.drawString(110 * mm, y, contatto[:38])
+        c.drawString(200 * mm, y, posti_str[:35])
+        c.drawString(260 * mm, y, '✓ Presente' if p.presente else '')
+        y -= riga_h
+
+    c.save()
+    buffer.seek(0)
+    return buffer
+
+
+@app.route('/admin/evento/<int:event_id>/stampa-pdf')
+@login_required
+def stampa_evento_pdf(event_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+
+    buffer = _genera_pdf_evento(evento)
+    filename = f"evento_{evento.id}_{evento.data_evento.strftime('%Y%m%d')}.pdf"
+    return Response(
+        buffer.read(), mimetype='application/pdf',
+        headers={'Content-Disposition': f'inline; filename="{filename}"'}
+    )
 
 
 if __name__ == '__main__':

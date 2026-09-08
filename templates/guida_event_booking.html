@@ -731,9 +731,12 @@
             <p>Le prenotazioni sono divise in due gruppi:</p>
             <ul>
                 <li><strong>Prossime</strong>: eventi non ancora passati, con evento, data, ora, sala, i posti prenotati (es. "A1, A2") e lo stato della prenotazione</li>
-                <li><strong>Passate</strong>: eventi già conclusi, mostrate in grigio come semplice storico</li>
+                <li><strong>Passate</strong>: eventi già conclusi, mostrate in grigio come semplice storico, con l'indicazione se è stato registrato il tuo ingresso all'evento</li>
             </ul>
         </div>
+    </div>
+    <div class="alert alert-info">
+        <strong>Check-in:</strong> se all'ingresso dell'evento un amministratore ti ha registrato come presente, vedrai l'etichetta <strong>✓ Check-in effettuato</strong> (nelle prossime) o <strong>✓ Presente</strong> (nelle passate) accanto alla prenotazione.
     </div>
     <div class="alert alert-info">
         <strong>Evento annullato:</strong> se una prenotazione riguarda un evento nel frattempo annullato (perché l'organizzatore lo ha rimosso dal calendario Google collegato — vedi <a href="#utente-calendario">2.3</a>), comparirà l'etichetta <strong>Evento annullato</strong> accanto al nome: la prenotazione resta visibile per tua memoria, ma l'evento non è più attivo.
@@ -1208,6 +1211,20 @@ source venv/bin/activate    (Linux/Mac)</pre>
         <li>Data e ora della prenotazione</li>
         <li>Elenco completo dei posti prenotati</li>
     </ul>
+
+    <h3>Check-in all'ingresso (presenza)</h3>
+    <p>Nella tabella delle prenotazioni, ogni riga ha una casella <strong>Presente</strong>: spuntala quando la persona arriva e si siede. Il salvataggio è immediato (senza ricaricare la pagina) e registra anche l'orario. Lo stato compare poi anche nella pagina "Le mie prenotazioni" dell'utente stesso.</p>
+    <div class="alert alert-info">
+        <strong>Nota:</strong> la casella si può anche despuntare in caso di errore — non è un'azione definitiva.
+    </div>
+
+    <h3>Stampa PDF per l'ingresso</h3>
+    <p>Il pulsante <strong>🖨️ Stampa PDF</strong> in alto genera un PDF in formato A3 orizzontale, pensato per essere stampato e usato come riferimento cartaceo il giorno dell'evento:</p>
+    <ul>
+        <li><strong>Pagina 1 — Mappa posti:</strong> l'intera pianta della sala con fila/colonna di ogni posto; sui posti occupati compare anche il nome della prenotazione</li>
+        <li><strong>Pagina 2 — Elenco prenotazioni:</strong> nome, contatto e posti di ogni prenotazione, con una casella vuota da barrare a penna e una colonna che mostra se il check-in è già stato fatto dall'app</li>
+    </ul>
+    <p>Si apre in una nuova scheda del browser, pronta per la stampa (Ctrl+P / Cmd+P) o il salvataggio come file.</p>
 </div>
 
 <div class="section" id="admin-ricerca">
@@ -1850,6 +1867,12 @@ source venv/bin/activate    (Linux/Mac)</pre>
 {% if current_user.is_admin() %}
 <div class="section" id="changelog">
     <h2>📝 6. Changelog</h2>
+
+    <h3>v2.2 (2026)</h3>
+    <ul>
+        <li><strong>Nuovo:</strong> Gestione Prenotazioni (3.10) — check-in presenza in-app (casella "Presente" per ogni prenotazione) e stampa PDF A3 (mappa posti + elenco prenotazioni) per uso all'ingresso</li>
+        <li><strong>Nuovo:</strong> Le mie prenotazioni (2.6) — mostra se è stato registrato il check-in per una prenotazione</li>
+    </ul>
 
     <h3>v2.1 (2026)</h3>
     <ul>

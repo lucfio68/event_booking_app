@@ -50,7 +50,10 @@ Dettaglio di ciascuno step, decisioni e punti aperti nella sezione dedicata più
 **Fase C considerata chiusa** salvo emergano errori durante il test conclusivo di Step 2-5 già consegnati.
 
 **Fase D — Stampe e Check-in con QR Code: 🔶 IN ANALISI** (rinominata da Fase C il 28 agosto 2026, ora a seguire della Fase C sul Gestore Evento appena completata)
-- **Step 1 — Generazione PDF A3 (mappa posti + elenco prenotazioni): ⬜ DA FARE**
+- **Step 1 — Generazione PDF A3 (mappa posti + elenco prenotazioni): ✅ IMPLEMENTATO, DA TESTARE**
+  Pulsante "🖨️ Stampa PDF" su Gestione Evento, apre un PDF A3 orizzontale a 2 pagine generato con `reportlab`: pagina 1 mappa posti (fila/colonna, corridoi, nome di chi ha prenotato scritto sul posto occupato); pagina 2 elenco prenotazioni con casella vuota da barrare a penna, più colonna "Check-in app" che mostra se è già stato segnato presente dall'app.
+  **Ampliato oltre alla sola stampa** (richiesta dell'utente): aggiunto anche un check-in **in-app**, per evitare il doppio lavoro carta+app — `Prenotazione` guadagna `presente`/`check_in_at`/`check_in_da`; su "Gestione Evento" ogni prenotazione ha una checkbox "Presente" (via `/api/prenotazione/<id>/presente`, AJAX); lo stato presente/assente compare anche in "Le mie prenotazioni" (wallet utente), sia per le prenotazioni future (badge "Check-in effettuato") sia per quelle passate (badge "Presente" o "Non risulta check-in").
+  **Da fare prima del primo test**: visitare `/admin/migrate-prenotazione-checkin?key=<MIGRATION_SECRET>`.
 - **Step 2 — QR code sul biglietto (token firmato, invio con l'email di conferma): ⬜ DA FARE**
 - **Step 3 — Pagina di check-in per admin da telefono: ⬜ DA FARE**
 - **Step 4 — Totem con lettore QR fisico all'ingresso: ⬜ DA FARE**
@@ -122,10 +125,10 @@ Alla conferma di una prenotazione, inviare (probabilmente via email, riusando `_
 
 ### Punti aperti da decidere insieme prima di scrivere codice
 
-- **Cosa stampare in A3**: mappa posti soltanto, o anche una seconda pagina con l'elenco nominale ordinato (per cercare più velocemente una persona per cognome)?
-- **Quando generare il PDF**: on-demand ogni volta che serve (sempre aggiornato, ma un click in più prima di ogni turno), oppure con un pulsante dedicato "Stampa mappa" nella pagina evento?
+- ~~**Cosa stampare in A3**~~ — **Risolto (Step 1)**: entrambe le cose, su 2 pagine — mappa posti (con nomi) + elenco nominale con casella da barrare
+- ~~**Quando generare il PDF**~~ — **Risolto (Step 1)**: on-demand, pulsante "🖨️ Stampa PDF" nella pagina Gestione Evento
 - **Un solo QR per prenotazione o un QR per singolo posto**: dato che una prenotazione può includere più posti, il QR identifica l'intera prenotazione (mostrando tutti i posti insieme) o serve un QR distinto per ciascun posto/persona?
-- **QR monouso o riusabile**: serve segnare la prenotazione come "check-in effettuato" per evitare che lo stesso biglietto venga riletto più volte (rivendita, ingresso multiplo), oppure la lettura è solo informativa senza tracciare lo stato?
+- **QR monouso o riusabile**: serve segnare la prenotazione come "check-in effettuato" per evitare che lo stesso biglietto venga riletto più volte (rivendita, ingresso multiplo), oppure la lettura è solo informativa senza tracciare lo stato? (nota: il campo `Prenotazione.presente` introdotto nello Step 1 può già essere riusato qui)
 - **Sicurezza del totem**: una sessione admin lasciata aperta su un dispositivo fisico all'ingresso è un rischio (accesso a tutto il pannello admin se rubato/manomesso). Alternative: un token dedicato "solo lettura check-in" separato dal login admin completo, oppure si accetta il rischio assumendo il totem sorvegliato.
 - **Hardware del totem**: già disponibile (marca/modello del lettore QR) o ancora da scegliere? Cambia se serve emulazione tastiera (soluzione più semplice, sopra) o integrazione più complessa.
 
@@ -195,6 +198,7 @@ https://raw.githubusercontent.com/lucfio68/event_booking_app/main/app.py
 
 ## Changelog Fase B (versioning delle modifiche)
 
+- **28 agosto 2026** — Fase D, Step 1 implementato: stampa PDF A3 (mappa posti + elenco prenotazioni) via `reportlab`, più check-in presenza in-app (`Prenotazione.presente`), visibile anche nel wallet "Le mie prenotazioni". Migrazione `/admin/migrate-prenotazione-checkin`.
 - **28 agosto 2026** — Fase C, Step 5 implementato (Fase C completata): import Google Calendar con campo Gestore facoltativo + selezione Genere per riga, filtrata sul Gestore scelto.
 - **28 agosto 2026** — Gestione Evento (`admin_view.html`): intestazione Gestore/Genere con loghi spostata sopra il titolo, loghi ingranditi (48px), ricerche prenotazioni/posti riallineate a destra su desktop.
 - **28 agosto 2026** — Fase C, Step 4 implementato: `Evento.gestore_id`, creazione evento a cascata (Sala→Gestore→Genere filtrato, con logo), aggiornata "Gestione Evento", migrazione `/admin/migrate-evento-gestore`.

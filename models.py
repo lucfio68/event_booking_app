@@ -150,6 +150,10 @@ class Prenotazione(db.Model):
     nome_prenotazione = db.Column(db.String(150), nullable=True)
     stato = db.Column(db.String(50), default='confermata')
     data_prenotazione = db.Column(db.DateTime, default=datetime.utcnow)
+    # Fase D - Step 1: check-in all'ingresso (spunta presenza)
+    presente = db.Column(db.Boolean, nullable=False, default=False)
+    check_in_at = db.Column(db.DateTime, nullable=True)
+    check_in_da = db.Column(db.Integer, db.ForeignKey('utente.id'), nullable=True)  # admin che ha segnato la presenza
 
     posti = db.relationship('Posto', backref='prenotazione', lazy=True)
 
