@@ -23,7 +23,11 @@
         </div>
         <div style="margin-bottom:20px;">
             <label style="display:block;margin-bottom:5px;font-weight:600;">Password * (min 8 caratteri)</label>
-            <input type="password" name="password" required minlength="8" style="width:100%;padding:12px;border:2px solid #e0e0e0;border-radius:8px;">
+            <div style="position:relative;">
+                <input type="password" name="password" id="password" required minlength="8" autocomplete="new-password" style="width:100%;padding:12px 45px 12px 12px;border:2px solid #e0e0e0;border-radius:8px;box-sizing:border-box;">
+                <button type="button" data-toggle-password="password" title="Mostra/nascondi password"
+                        style="position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:none;cursor:pointer;font-size:18px;padding:6px;line-height:1;">👁</button>
+            </div>
         </div>
         <button type="submit" style="width:100%;padding:12px;background:#27ae60;color:white;border:none;border-radius:8px;font-size:1em;font-weight:600;cursor:pointer;">Registrati</button>
     </form>
@@ -31,4 +35,14 @@
         <a href="{{ url_for('login') }}" style="color:#3498db;font-size:0.9em;">Hai gia' un account? Login</a>
     </div>
 </div>
+<script>
+// Occhiolino: mostra/nascondi password (inline per evitare problemi di cache)
+document.querySelectorAll('[data-toggle-password]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var input = document.getElementById(this.getAttribute('data-toggle-password'));
+        input.type = (input.type === 'password') ? 'text' : 'password';
+        this.textContent = (input.type === 'password') ? '👁' : '🙈';
+    });
+});
+</script>
 {% endblock %}

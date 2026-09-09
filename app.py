@@ -509,14 +509,25 @@ def login():
         identifier = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
 
+        # DEBUG temporaneo: non logga mai la password, solo diagnostica
+        app.logger.info(f'LOGIN DEBUG: identifier={identifier!r} len_password={len(password)}')
+
         if '@' in identifier:
             user = Utente.query.filter_by(email=identifier).first()
+            app.logger.info(f'LOGIN DEBUG: ricerca per email -> trovato={user is not None}')
         else:
             user = Utente.query.filter_by(username=identifier).first()
+            app.logger.info(f'LOGIN DEBUG: ricerca per username -> trovato={user is not None}')
 
-        if user and user.check_password(password):
-            login_user(user)
-            return redirect(url_for('calendar_view'))
+        if user:
+            ok = user.check_password(password)
+            app.logger.info(
+                f'LOGIN DEBUG: user_id={user.id} tipo={user.tipo} '
+                f'check_password={ok} hash_prefix={user.password_hash[:20]!r}'
+            )
+            if ok:
+                login_user(user)
+                return redirect(url_for('calendar_view'))
         flash('Credenziali non valide.', 'danger')
     return render_template('login.html')
 
