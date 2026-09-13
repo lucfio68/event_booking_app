@@ -492,6 +492,7 @@ def register():
 
         user = Utente(nome_cognome=nome, username=username, email=email, cellulare=cellulare, tipo='user')
         user.set_password(password)
+        print(f"DEBUG: Generated hash for {username}: {user.password_hash[:50]}...")  # Add this
         db.session.add(user)
         db.session.commit()
 
