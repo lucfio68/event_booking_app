@@ -50,10 +50,8 @@ Dettaglio di ciascuno step, decisioni e punti aperti nella sezione dedicata più
 **Fase C considerata chiusa** salvo emergano errori durante il test conclusivo di Step 2-5 già consegnati.
 
 **Fase D — Stampe e Check-in con QR Code: 🔶 IN ANALISI** (rinominata da Fase C il 28 agosto 2026, ora a seguire della Fase C sul Gestore Evento appena completata)
-- **Step 1 — Generazione PDF A3 (mappa posti + elenco prenotazioni): ✅ IMPLEMENTATO, DA TESTARE**
-  Pulsante "🖨️ Stampa PDF" su Gestione Evento, apre un PDF A3 orizzontale a 2 pagine generato con `reportlab`: pagina 1 mappa posti (fila/colonna, corridoi, nome di chi ha prenotato scritto sul posto occupato); pagina 2 elenco prenotazioni con casella vuota da barrare a penna, più colonna "Check-in app" che mostra se è già stato segnato presente dall'app.
-  **Ampliato oltre alla sola stampa** (richiesta dell'utente): aggiunto anche un check-in **in-app**, per evitare il doppio lavoro carta+app — `Prenotazione` guadagna `presente`/`check_in_at`/`check_in_da`; su "Gestione Evento" ogni prenotazione ha una checkbox "Presente" (via `/api/prenotazione/<id>/presente`, AJAX); lo stato presente/assente compare anche in "Le mie prenotazioni" (wallet utente), sia per le prenotazioni future (badge "Check-in effettuato") sia per quelle passate (badge "Presente" o "Non risulta check-in").
-  **Da fare prima del primo test**: visitare `/admin/migrate-prenotazione-checkin?key=<MIGRATION_SECRET>`.
+- **Step 1 — Generazione PDF A3 (mappa posti + elenco prenotazioni): ✅ COMPLETATO E TESTATO**
+  Pulsante "🖨️ Stampa PDF" su Gestione Evento, PDF A3 orizzontale a 2 pagine (mappa posti + elenco prenotazioni) via `reportlab`. Check-in presenza in-app (`Prenotazione.presente`/`check_in_at`/`check_in_da`) con checkbox "Presente" su Gestione Evento e badge in "Le mie prenotazioni".
 - **Step 2 — QR code sul biglietto (token firmato, invio con l'email di conferma): ⬜ DA FARE**
 - **Step 3 — Pagina di check-in per admin da telefono: ⬜ DA FARE**
 - **Step 4 — Totem con lettore QR fisico all'ingresso: ⬜ DA FARE**
@@ -198,6 +196,7 @@ https://raw.githubusercontent.com/lucfio68/event_booking_app/main/app.py
 
 ## Changelog Fase B (versioning delle modifiche)
 
+- **28 agosto 2026** — Fase D, Step 1 testato e chiuso: fix FK ambigua (`Utente.prenotazioni` con `foreign_keys=` esplicito dopo l'introduzione di `check_in_da`), aggiunta `_run_startup_migrations()` per applicare in automatico le colonne di check-in ad ogni avvio (niente più dipendenza dal login admin per questa migrazione specifica).
 - **28 agosto 2026** — Fase D, Step 1 implementato: stampa PDF A3 (mappa posti + elenco prenotazioni) via `reportlab`, più check-in presenza in-app (`Prenotazione.presente`), visibile anche nel wallet "Le mie prenotazioni". Migrazione `/admin/migrate-prenotazione-checkin`.
 - **28 agosto 2026** — Fase C, Step 5 implementato (Fase C completata): import Google Calendar con campo Gestore facoltativo + selezione Genere per riga, filtrata sul Gestore scelto.
 - **28 agosto 2026** — Gestione Evento (`admin_view.html`): intestazione Gestore/Genere con loghi spostata sopra il titolo, loghi ingranditi (48px), ricerche prenotazioni/posti riallineate a destra su desktop.
@@ -211,9 +210,18 @@ https://raw.githubusercontent.com/lucfio68/event_booking_app/main/app.py
 - **v1.1.0 (data non specificata, dichiarato completato e testato dall'utente)** — Step 1: connessione OAuth Google (`GoogleConnessione`, route `/admin/google*`, template `admin_google.html`).
 - **v1.0.0 (2 agosto 2026)** — Fase A completata: Layout Posti, Generi Evento, overbooking a due livelli.
 
+## ⚠️ Lezioni imparate durante il deploy/debug (28 agosto 2026)
+
+Problemi reali riscontrati dopo il deploy della Fase D Step 1, utili da ricordare per il futuro:
+
+- **Nuove colonne su tabelle già esistenti bloccano il login se non gestite**: aggiungere colonne a un modello (es. `Prenotazione.presente`) fa sì che *ogni* query su quel modello le includa nel `SELECT`, anche se non le usi subito. Se il DB non le ha ancora, qualunque pagina che tocchi quel modello va in errore. **Soluzione adottata**: una funzione `_run_startup_migrations()` eseguita automaticamente ad ogni avvio del worker (in fondo ad `app.py`, tramite `with app.app_context(): db.create_all(); _run_startup_migrations()`), che aggiunge le colonne mancanti da sola con `ALTER TABLE ... IF NOT EXISTS`-style checks via `inspector`, **senza bisogno di login admin**. Risolve il problema "chicken-and-egg" (serve l'admin per migrare, ma il login può rompersi proprio per colonne mancanti). Da estendere alle prossime migrazioni invece di usare solo route protette `/admin/migrate-*`.
+- **Foreign key multiple verso la stessa tabella vanno disambiguate esplicitamente**: aggiungendo `Prenotazione.check_in_da` (seconda FK verso `utente`, oltre a `utente_id` già esistente), la relationship `Utente.prenotazioni` è diventata ambigua per SQLAlchemy. Va sempre specificato `foreign_keys=` quando un modello ha più FK verso la stessa tabella collegata da una `relationship`/`backref`.
+- **Neon: un branch copia l'intero cluster Postgres, non solo il database in uso**. Se il progetto usa un database con nome custom (qui `event_booking`, non il default `neondb`), un ambiente di test collegato a un branch può ritrovarsi con `DATABASE_URL` puntata per errore al database vuoto `neondb` invece che a `event_booking` — sintomo tipico: tabelle "vuote" o comportamento che sembra un DB "resettato" pur avendo fatto un branch di produzione. Controllare sempre che l'ultima parte della stringa di connessione corrisponda al database giusto.
+- **Reset password via SQL diretto è legittimo e sicuro**: generare un nuovo hash con `werkzeug.security.generate_password_hash` (stessa versione di Werkzeug del progetto) e sovrascrivere `password_hash` via `UPDATE` diretto sul DB è equivalente a un reset password normale — non compromette la sicurezza dell'account, utile per sbloccarsi quando il login stesso è irraggiungibile.
+
 ## Note
 
-- Ultimo aggiornamento struttura: 26 agosto 2026
+- Ultimo aggiornamento struttura: 28 agosto 2026
 - Branch principale: `main`
-- Versione guida: v1.7
+- Versione guida: v2.2
 - Versione backend (Fase B): v1.3.0 — vedi changelog sopra

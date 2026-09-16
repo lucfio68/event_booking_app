@@ -3,113 +3,93 @@
 
 {% block content %}
 <style>
+    :root {
+        --seat: 50px;           /* dimensione posto, ricalcolata via JS */
+        --seat-gap: 8px;        /* gap tra posti, ricalcolata via JS */
+        --corr-w: 20px;         /* larghezza corridoio verticale */
+        --corr-h: 24px;         /* altezza corridoio orizzontale */
+    }
+
     .booking-container { max-width: 900px; margin: 0 auto; padding: 20px; }
     .event-header { background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
     .event-header h2 { color: #2c3e50; margin-bottom: 10px; }
-    .event-meta { color: #666; font-size: 0.95em; }
-    .legend { display: flex; gap: 20px; margin: 15px 0; flex-wrap: wrap; justify-content: center; }
-    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.9em; }
-    .legend-box { width: 20px; height: 20px; border-radius: 4px; border: 1px solid #ddd; }
-    .seats-grid { display: grid; gap: 8px; margin: 20px 0; justify-content: center; }
+    .event-meta { color: #666; font-size: 0.95em; display: flex; flex-wrap: wrap; gap: 4px 0; }
+
+    /* ===== SCROLL ORIZZONTALE DELLA GRIGLIA ===== */
+    .seats-scroll {
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 8px;
+        scrollbar-width: thin;
+    }
+    .seats-scroll::-webkit-scrollbar { height: 8px; }
+    .seats-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+    .seats-grid { display: inline-block; margin: 20px 0; white-space: nowrap; }
+
+    .seat-row { display: flex; align-items: center; margin-bottom: 4px; }
+    .row-label {
+        width: 24px; min-width: 24px;
+        text-align: center; font-weight: bold; color: #475569; font-size: 0.9em;
+        margin-right: var(--seat-gap);
+    }
+
     .seat {
-        width: 50px; height: 50px;
+        width: var(--seat); height: var(--seat);
+        min-width: var(--seat); min-height: var(--seat);
+        margin-right: var(--seat-gap);
         border-radius: 8px;
         display: flex; flex-direction: column;
         align-items: center; justify-content: center;
-        font-size: 0.75em;
+        font-size: calc(var(--seat) * 0.18);
         font-weight: 600;
         transition: all 0.2s;
         border: 2px solid transparent;
         user-select: none;
         position: relative;
+        box-sizing: border-box;
+        overflow: hidden;
     }
-    .seat .seat-label { font-size: 0.65em; opacity: 0.7; margin-top: 2px; }
+
+    .legend { display: flex; gap: 20px; margin: 15px 0; flex-wrap: wrap; justify-content: center; }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.9em; }
+    .legend-box { width: 20px; height: 20px; border-radius: 4px; border: 1px solid #ddd; flex-shrink: 0; }
 
     /* Libero - bianco, cliccabile */
-    .seat.libero { 
-        background: #ffffff; 
-        border-color: #bdc3c7; 
-        color: #333; 
-        cursor: pointer;
-    }
-    .seat.libero:hover { 
-        background: #ecf0f1; 
-        transform: scale(1.1); 
-    }
+    .seat.libero { background: #ffffff; border-color: #bdc3c7; color: #333; cursor: pointer; }
+    .seat.libero:hover { background: #ecf0f1; transform: scale(1.1); }
 
-    /* Selezionato per prenotazione - verde acqua */
-    .seat.selezionato { 
-        background: #1abc9c !important; 
-        color: white !important; 
-        border-color: #16a085 !important;
-        cursor: pointer;
-        transform: scale(1.15);
-        box-shadow: 0 4px 12px rgba(26, 188, 156, 0.4);
-    }
+    /* Selezionato - verde acqua */
+    .seat.selezionato { background: #1abc9c !important; color: white !important; border-color: #16a085 !important; cursor: pointer; transform: scale(1.1); box-shadow: 0 4px 12px rgba(26, 188, 156, 0.4); }
 
     /* Selezionato per CANCELLAZIONE - rosso lampeggiante */
-    .seat.selezionato-canc {
-        animation: pulse-red 0.8s ease-in-out infinite alternate;
-        cursor: pointer;
-        transform: scale(1.15);
-        z-index: 10;
-    }
+    .seat.selezionato-canc { animation: pulse-red 0.8s ease-in-out infinite alternate; cursor: pointer; transform: scale(1.1); z-index: 10; }
     @keyframes pulse-red {
         from { box-shadow: 0 0 0 3px #e74c3c, 0 4px 12px rgba(231, 76, 60, 0.3); }
         to { box-shadow: 0 0 0 6px #e74c3c, 0 4px 16px rgba(231, 76, 60, 0.6); }
     }
 
-    /* Prenotato da ME - azzurro */
-    .seat.mio { 
-        background: #3498db; 
-        color: white; 
-        cursor: pointer;
-    }
-    .seat.mio:hover { 
-        opacity: 0.9; 
-    }
+    .seat.mio { background: #3498db; color: white; cursor: pointer; }
+    .seat.mio:hover { opacity: 0.9; }
 
-    /* Prenotato da ALTRI - grigio scuro */
-    .seat.prenotato-altri { 
-        background: #555555; 
-        color: #cccccc; 
-        cursor: not-allowed;
-        opacity: 0.85;
-    }
+    .seat.prenotato-altri { background: #555555; color: #cccccc; cursor: not-allowed; opacity: 0.85; }
 
-    /* Riservato - arancione */
-    .seat.riservato { 
-        background: #e67e22; 
-        color: white; 
-        cursor: not-allowed;
-    }
+    .seat.riservato { background: #e67e22; color: white; cursor: not-allowed; }
+    .seat.riservato-admin { background: #e67e22; color: white; cursor: pointer; }
+    .seat.riservato-admin:hover { opacity: 0.9; }
 
-    /* Admin: riservato cliccabile per cancellare */
-    .seat.riservato-admin { 
-        background: #e67e22; 
-        color: white; 
-        cursor: pointer;
-    }
-    .seat.riservato-admin:hover { 
-        opacity: 0.9; 
-    }
+    .seat.abbonato { background: #8b5cf6; color: white; cursor: not-allowed; }
+    .seat.abbonato-admin { background: #8b5cf6; color: white; cursor: pointer; }
+    .seat.abbonato-admin:hover { opacity: 0.9; }
 
-    /* Admin: prenotato da altri cliccabile per cancellare */
-    .seat.admin-canc { 
-        background: #3498db; 
-        color: white; 
-        cursor: pointer;
-    }
-    .seat.admin-canc:hover { 
-        opacity: 0.9; 
-    }
+    .seat.admin-canc { background: #3498db; color: white; cursor: pointer; }
+    .seat.admin-canc:hover { opacity: 0.9; }
 
-    .seat .nome-pren { 
-        font-size: 0.55em; 
-        max-width: 90%; 
-        overflow: hidden; 
-        text-overflow: ellipsis; 
-        white-space: nowrap; 
+    .seat .nome-pren {
+        font-size: calc(var(--seat) * 0.13);
+        max-width: 95%;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
 
     .actions { display: flex; gap: 10px; justify-content: center; margin: 20px 0; flex-wrap: wrap; }
@@ -124,36 +104,47 @@
 
     .screen { text-align: center; padding: 10px; background: linear-gradient(180deg, #ddd, #eee); border-radius: 8px; margin-bottom: 20px; font-weight: bold; color: #666; letter-spacing: 2px; }
 
-    /* Feedback invio */
-    .sending-overlay {
-        display: none; position: fixed; top:0; left:0; width:100%; height:100%;
-        background: rgba(0,0,0,0.6); z-index: 2000; align-items: center; justify-content: center; flex-direction: column;
-    }
+    .sending-overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.6); z-index: 2000; align-items: center; justify-content: center; flex-direction: column; }
     .sending-overlay.active { display: flex; }
-    .sending-box { background: white; padding: 40px; border-radius: 16px; text-align: center; }
+    .sending-box { background: white; padding: 40px; border-radius: 16px; text-align: center; max-width: 90vw; box-sizing: border-box; }
     .spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #3498db; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 15px; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* Modal */
-    .modal-overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+    .modal-overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
     .modal-overlay.active { display: flex; }
-    .modal-box { background: white; padding: 30px; border-radius: 16px; max-width: 400px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+    .modal-box { background: white; padding: 30px; border-radius: 16px; max-width: 400px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,0.2); box-sizing: border-box; }
     .modal-box h3 { margin-bottom: 15px; color: #2c3e50; }
-    .modal-box input { width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1em; margin-bottom: 15px; }
+    .modal-box input { width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1em; margin-bottom: 15px; box-sizing: border-box; }
     .modal-box input:focus { border-color: #3498db; outline: none; }
     .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
     .btn-cancel { background: #95a5a6; color: white; padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; }
     .btn-confirm { background: #3498db; color: white; padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; }
+
+    /* Corridoi */
+    .corridoio-col { width: var(--corr-w); height: var(--seat); display: flex; align-items: center; justify-content: center; }
+    .corridoio-row { width: 100%; height: var(--corr-h); display: flex; align-items: center; justify-content: center; margin: 4px 0; }
+
+    /* ===== MEDIA QUERY MOBILE ===== */
+    @media (max-width: 480px) {
+        .booking-container { padding: 10px; }
+        .event-header { padding: 14px; border-radius: 10px; }
+        .event-header h2 { font-size: 1.2em; }
+        .btn { width: 100%; padding: 14px; }
+        .actions { flex-direction: column; }
+        .legend { gap: 10px 14px; font-size: 0.8em; }
+        .screen { letter-spacing: 1px; font-size: 0.85em; }
+        .modal-box { padding: 20px; }
+    }
 </style>
 
 <div class="booking-container">
     <div class="event-header">
         <h2>{{ evento.nome }}</h2>
         <div class="event-meta">
-            📅 {{ evento.data_evento.strftime('%d/%m/%Y') }} &nbsp;|&nbsp;
-            🕐 {{ evento.ora_inizio.strftime('%H:%M') }} &nbsp;|&nbsp;
-            📍 {{ evento.sala.nome }} &nbsp;|&nbsp;
-            ⏱️ {{ evento.durata }} min
+            <span>📅 {{ evento.data_evento.strftime('%d/%m/%Y') }}</span>&nbsp;|&nbsp;
+            <span>🕐 {{ evento.ora_inizio.strftime('%H:%M') }}</span>&nbsp;|&nbsp;
+            <span>📍 {{ evento.sala.nome }}</span>&nbsp;|&nbsp;
+            <span>⏱️ {{ evento.durata }} min</span>
         </div>
     </div>
 
@@ -173,7 +164,9 @@
         <div class="legend-item"><div class="legend-box" style="background:#8b5cf6;"></div> Abbonato</div>
     </div>
 
-    <div id="seats-container" class="seats-grid"></div>
+    <div class="seats-scroll">
+        <div id="seats-container" class="seats-grid"></div>
+    </div>
 
     <div class="actions">
         <button id="btn-prenota" class="btn btn-primary" disabled onclick="conferma('book')">
@@ -193,7 +186,6 @@
     </div>
 </div>
 
-<!-- Overlay invio in corso -->
 <div id="sending-overlay" class="sending-overlay">
     <div class="sending-box">
         <div class="spinner"></div>
@@ -202,7 +194,6 @@
     </div>
 </div>
 
-<!-- Modal Nome Prenotazione -->
 <div id="modal-nome" class="modal-overlay">
     <div class="modal-box">
         <h3 id="modal-titolo">Nome della prenotazione</h3>
@@ -222,6 +213,8 @@ const DEFAULT_NAME = "{{ current_user.nome_cognome }}";
 let selectedSeats = [];
 let selectedToDelete = [];
 let azioneCorrente = null;
+let _colsAttuali = 0;
+let _corrColCount = 0;
 
 function parseCorridoi(str) {
     if (!str || str === '') return [];
@@ -229,50 +222,77 @@ function parseCorridoi(str) {
     return str.split(',').map(function(x) { return parseInt(x.trim(), 10); }).filter(function(x) { return !isNaN(x); });
 }
 
+/* Calcola la dimensione dei posti in base allo spazio disponibile:
+   se la griglia entra nel container i posti restano grandi (max 50px),
+   altrimenti si riducono (min 28px) e la griglia diventa scorrevole in orizzontale. */
+function aggiornaDimensioniPosti(colonne, nCorridoioCol) {
+    const container = document.getElementById('seats-container');
+    const scroll = container.closest('.seats-scroll');
+    const disponibile = scroll.clientWidth || window.innerWidth - 40;
+
+    const labelRiga = 24;
+    const gap = disponibile < 480 ? 4 : 8;
+    const slotTotali = colonne + nCorridoioCol * 0.4;
+    const margine = labelRiga + 10;
+
+    let seat = Math.floor((disponibile - margine - gap * colonne) / slotTotali);
+    seat = Math.max(28, Math.min(50, seat));
+
+    container.style.setProperty('--seat', seat + 'px');
+    container.style.setProperty('--seat-gap', gap + 'px');
+    container.style.setProperty('--corr-w', Math.max(12, seat * 0.4) + 'px');
+}
+
+window.addEventListener('resize', function() {
+    if (_colsAttuali > 0) aggiornaDimensioniPosti(_colsAttuali, _corrColCount);
+});
+
 function loadSeats() {
     fetch(`/api/seats/${EVENTO_ID}`)
         .then(r => r.json())
-        .then(data => {
-            renderSeats(data);
-        });
+        .then(data => { renderSeats(data); })
+        .catch(() => { document.getElementById('seats-container').innerHTML = '<p>Errore di caricamento. Riprova.</p>'; });
 }
 
 function renderSeats(posti) {
     const container = document.getElementById('seats-container');
     if (!posti.length) { container.innerHTML = '<p>Nessun posto disponibile.</p>'; return; }
 
-    // Ottieni info corridoi
     const corrCol = parseCorridoi(posti[0] && posti[0].corridoio_colonne);
     const corrFile = parseCorridoi(posti[0] && posti[0].corridoio_file);
 
     const colonne = Math.max(...posti.map(p => p.colonna));
     const file = Math.max(...posti.map(p => p.fila.charCodeAt(0) - 64));
+    _colsAttuali = colonne;
+    _corrColCount = corrCol.length;
 
-    // Crea mappa posizione -> posto
+    aggiornaDimensioniPosti(colonne, corrCol.length);
+
     const postoMap = {};
-    posti.forEach(p => {
-        postoMap[p.fila + '-' + p.colonna] = p;
-    });
-
-    // Rendi il container flex column per le righe
-    container.style.display = 'flex';
-    container.style.flexDirection = 'column';
-    container.style.alignItems = 'center';
-    container.style.gap = '0';
+    posti.forEach(p => { postoMap[p.fila + '-' + p.colonna] = p; });
 
     let html = '';
+
+    // Header numeri colonna (scompare su posti piccoli per non sprecare spazio)
+    html += `<div class="seat-row" style="margin-bottom:6px;">
+        <div class="row-label"></div>`;
+    for (let c = 1; c <= colonne; c++) {
+        html += `<div style="width:var(--seat); margin-right:var(--seat-gap); text-align:center; font-size:0.7em; color:#94a3b8; font-weight:600;">${c}</div>`;
+        if (corrCol.includes(c)) html += `<div style="width:var(--corr-w);"></div>`;
+    }
+    html += `</div>`;
 
     for (let f = 1; f <= file; f++) {
         const filaLettera = String.fromCharCode(64 + f);
 
-        html += `<div class="seat-row" style="display:flex; gap:8px; align-items:center; margin-bottom:4px;">`;
-        html += `<div style="width:32px; text-align:center; font-weight:bold; color:#475569; font-size:0.9em;">${filaLettera}</div>`;
+        html += `<div class="seat-row">`;
+        html += `<div class="row-label">${filaLettera}</div>`;
 
         for (let c = 1; c <= colonne; c++) {
             const p = postoMap[filaLettera + '-' + c];
             if (!p) {
-                // Spazio vuoto (non dovrebbe succedere)
-                html += `<div style="width:50px; height:50px;"></div>`;
+                html += `<div style="width:var(--seat); height:var(--seat); margin-right:var(--seat-gap);"></div>`;
+                if (corrCol.includes(c)) html += `<div style="width:var(--corr-w);"></div>`;
                 continue;
             }
 
@@ -286,42 +306,17 @@ function renderSeats(posti) {
                 cls = 'libero';
                 cliccabile = true;
             } else if (p.stato === 'abbonato') {
-                if (IS_ADMIN) {
-                    cls = 'abbonato-admin';
-                    cancellabile = true;
-                    cliccabile = true;
-                } else {
-                    cls = 'abbonato';
-                    cancellabile = false;
-                    cliccabile = false;
-                }
+                if (IS_ADMIN) { cls = 'abbonato-admin'; cancellabile = true; cliccabile = true; }
+                else { cls = 'abbonato'; }
                 nome = nome || 'Abbonato';
             } else if (p.stato === 'riservato') {
-                if (IS_ADMIN) {
-                    cls = 'riservato-admin';
-                    cancellabile = true;
-                    cliccabile = true;
-                } else {
-                    cls = 'riservato';
-                    cancellabile = false;
-                    cliccabile = false;
-                }
+                if (IS_ADMIN) { cls = 'riservato-admin'; cancellabile = true; cliccabile = true; }
+                else { cls = 'riservato'; }
                 nome = nome || 'Riservato';
             } else if (p.stato === 'prenotato') {
-                if (p.is_mio) {
-                    cls = 'mio';
-                    cancellabile = true;
-                    cliccabile = true;
-                } else if (IS_ADMIN) {
-                    cls = 'admin-canc';
-                    cancellabile = true;
-                    cliccabile = true;
-                } else {
-                    cls = 'prenotato-altri';
-                    cancellabile = false;
-                    cliccabile = false;
-                    nome = 'Occupato';
-                }
+                if (p.is_mio) { cls = 'mio'; cancellabile = true; cliccabile = true; }
+                else if (IS_ADMIN) { cls = 'admin-canc'; cancellabile = true; cliccabile = true; }
+                else { cls = 'prenotato-altri'; nome = 'Occupato'; }
             }
 
             if (nome && cls !== 'prenotato-altri') {
@@ -333,21 +328,15 @@ function renderSeats(posti) {
                 ${label}
             </div>`;
 
-            // Corridoio verticale DOPO la colonna (se specificato)
             if (corrCol.includes(c)) {
-                html += `<div class="corridoio-col" style="width:20px; height:50px; display:flex; align-items:center; justify-content:center;">
-                    <div style="width:8px; height:80%; background: repeating-linear-gradient(0deg, #e2e8f0, #e2e8f0 6px, #f1f5f9 6px, #f1f5f9 12px); border-radius:4px; opacity:0.6;"></div>
-                </div>`;
+                html += `<div class="corridoio-col"><div style="width:8px; height:80%; background: repeating-linear-gradient(0deg, #e2e8f0, #e2e8f0 6px, #f1f5f9 6px, #f1f5f9 12px); border-radius:4px; opacity:0.6;"></div></div>`;
             }
         }
 
         html += `</div>`;
 
-        // Corridoio orizzontale DOPO la fila (se specificato)
         if (corrFile.includes(f)) {
-            html += `<div class="corridoio-row" style="width:100%; height:24px; display:flex; align-items:center; justify-content:center; margin:4px 0;">
-                <div style="width:80%; height:12px; background: repeating-linear-gradient(90deg, #e2e8f0, #e2e8f0 8px, #f1f5f9 8px, #f1f5f9 16px); border-radius:6px; opacity:0.6;"></div>
-            </div>`;
+            html += `<div class="corridoio-row"><div style="width:80%; height:12px; background: repeating-linear-gradient(90deg, #e2e8f0, #e2e8f0 8px, #f1f5f9 8px, #f1f5f9 16px); border-radius:6px; opacity:0.6;"></div></div>`;
         }
     }
 
@@ -366,38 +355,23 @@ function toggleSeat(el) {
 
     if (!cliccabile) return;
 
-    // Modalita' CANCELLAZIONE: posti prenotati o riservati (admin)
     if ((stato === 'prenotato' || stato === 'riservato' || stato === 'abbonato') && cancellabile) {
         if (selectedToDelete.includes(id)) {
-            // Deseleziona
             selectedToDelete = selectedToDelete.filter(s => s !== id);
             el.classList.remove('selezionato-canc');
-            // Ripristina il colore originale
-            if (stato === 'riservato') {
-                el.style.background = '#e67e22';
-                el.style.color = 'white';
-            } else if (stato === 'abbonato') {
-                el.style.background = '#8b5cf6';
-                el.style.color = 'white';
-            } else if (stato === 'prenotato') {
-                el.style.background = '#3498db';
+            if (stato === 'riservato' || stato === 'abbonato' || stato === 'prenotato') {
+                el.style.background = stato === 'riservato' ? '#e67e22' : (stato === 'abbonato' ? '#8b5cf6' : '#3498db');
                 el.style.color = 'white';
             }
         } else {
-            // Seleziona per cancellazione - animazione rossa
             selectedToDelete.push(id);
             el.classList.add('selezionato-canc');
-            if (stato === 'riservato') {
-                el.style.background = '#c0392b';
-            } else {
-                el.style.background = '#c0392b';
-            }
+            el.style.background = '#c0392b';
         }
         updateButtons();
         return;
     }
 
-    // Modalita' PRENOTAZIONE: posti liberi
     if (stato === 'libero') {
         if (selectedSeats.includes(id)) {
             selectedSeats = selectedSeats.filter(s => s !== id);
@@ -438,10 +412,8 @@ function conferma(tipo) {
 function confermaCancella() {
     if (selectedToDelete.length === 0) return;
 
-    // Conta quanti riservati e quanti prenotati
     const container = document.getElementById('seats-container');
-    let riservati = 0;
-    let prenotati = 0;
+    let riservati = 0, prenotati = 0;
     selectedToDelete.forEach(id => {
         const el = container.querySelector(`[data-id="${id}"]`);
         if (el) {
@@ -451,11 +423,8 @@ function confermaCancella() {
     });
 
     let msg = `Sei sicuro di voler cancellare ${selectedToDelete.length} posto/i?`;
-    if (riservati > 0 && prenotati > 0) {
-        msg += `\n(${prenotati} prenotati, ${riservati} riservati)`;
-    } else if (riservati > 0) {
-        msg += `\n(${riservati} riservati)`;
-    }
+    if (riservati > 0 && prenotati > 0) msg += `\n(${prenotati} prenotati, ${riservati} riservati)`;
+    else if (riservati > 0) msg += `\n(${riservati} riservati)`;
 
     if (!confirm(msg)) return;
 
@@ -468,19 +437,10 @@ function confermaCancella() {
     })
     .then(r => r.json())
     .then(data => {
-        if (data.success) {
-            window.location.reload();
-        } else {
-            nascondiInvio();
-            alert(data.error || 'Errore nella cancellazione');
-            loadSeats();
-        }
+        if (data.success) { window.location.reload(); }
+        else { nascondiInvio(); alert(data.error || 'Errore nella cancellazione'); loadSeats(); }
     })
-    .catch(err => {
-        nascondiInvio();
-        alert('Errore di rete');
-        loadSeats();
-    });
+    .catch(() => { nascondiInvio(); alert('Errore di rete'); loadSeats(); });
 }
 
 function chiudiModal() {
@@ -514,27 +474,14 @@ function eseguiAzione() {
     fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            evento_id: EVENTO_ID,
-            posti_ids: selectedSeats,
-            nome_prenotazione: nome
-        })
+        body: JSON.stringify({ evento_id: EVENTO_ID, posti_ids: selectedSeats, nome_prenotazione: nome })
     })
     .then(r => r.json())
     .then(data => {
-        if (data.success) {
-            window.location.reload();
-        } else {
-            nascondiInvio();
-            alert(data.error || 'Errore');
-            loadSeats();
-        }
+        if (data.success) { window.location.reload(); }
+        else { nascondiInvio(); alert(data.error || 'Errore'); loadSeats(); }
     })
-    .catch(err => {
-        nascondiInvio();
-        alert('Errore di rete');
-        loadSeats();
-    });
+    .catch(() => { nascondiInvio(); alert('Errore di rete'); loadSeats(); });
 }
 
 document.getElementById('input-nome').addEventListener('keypress', function(e) {
