@@ -4,44 +4,44 @@
 {% block content %}
 <style>
     /* ============================================================
-       DIMENSIONI GRIGLIA — TUTTE IN CSS (no JS)
-       I breakpoint riducono progressivamente posti, gap e corridoi,
-       così anche con lo zoom da smartphone la griglia resta interamente
-       visibile o scorrevole, MAI tagliata a destra.
+       GRIGLIA FLUIDA — SENZA JS, SENZA DIMENSIONI FISSE DEI POSTI
+       I posti usano flex (flex:1 1 0) quindi riempiono ESATTAMENTE
+       la larghezza disponibile a QUALUNQUE zoom/orientamento:
+       il bordo destro non puo' MAI essere tagliato. Se lo schermo
+       e' cosi' stretto che i posti scenderebbero sotto il minimo,
+       entra in gioco lo scroll orizzontale (min-width: min-content).
+       --colonne e --corr-n arrivano da Jinja (inline style), cosi'
+       il CSS conosce la geometria della sala senza alcun JS.
        ============================================================ */
     :root {
-        --seat: 46px;           /* dimensione posto (desktop) */
         --seat-gap: 8px;        /* gap tra posti */
         --corr-w: 18px;         /* larghezza corridoio verticale */
         --corr-h: 24px;         /* altezza corridoio orizzontale */
         --row-label-w: 26px;    /* larghezza etichetta fila */
+        --seat-max: 56px;       /* dimensione massima di un posto */
+        --seat-min: 22px;       /* dimensione minima prima dello scroll */
+        --colonne: 10;          /* fallback, sovrascritto inline da Jinja */
+        --corr-n: 0;            /* fallback, sovrascritto inline da Jinja */
     }
 
-    @media (max-width: 768px) {
-        :root {
-            --seat: 36px;
-            --seat-gap: 6px;
-            --corr-w: 14px;
-            --corr-h: 20px;
-            --row-label-w: 22px;
-        }
-    }
     @media (max-width: 480px) {
         :root {
-            --seat: 30px;
             --seat-gap: 4px;
             --corr-w: 10px;
             --corr-h: 16px;
             --row-label-w: 18px;
+            --seat-max: 48px;
+            --seat-min: 18px;
         }
     }
     @media (max-width: 360px) {
         :root {
-            --seat: 24px;
             --seat-gap: 3px;
             --corr-w: 8px;
             --corr-h: 12px;
             --row-label-w: 16px;
+            --seat-max: 42px;
+            --seat-min: 16px;
         }
     }
 
@@ -51,9 +51,7 @@
     .event-header h2 { color: #2c3e50; margin-bottom: 10px; }
     .event-meta { color: #666; font-size: 0.95em; display: flex; flex-wrap: wrap; gap: 4px 0; }
 
-    /* ===== SCROLL ORIZZONTALE DELLA GRIGLIA =====
-       Il contenitore scrolla; la griglia e' inline-block quindi larga
-       esattamente quanto il suo contenuto: mai compressa, mai tagliata. */
+    /* Container di scroll + query container per calcolare le dimensioni */
     .seats-scroll {
         overflow-x: auto;
         overflow-y: hidden;
@@ -61,32 +59,57 @@
         padding-bottom: 8px;
         width: 100%;
         scrollbar-width: thin;
+        container-type: inline-size;
     }
     .seats-scroll::-webkit-scrollbar { height: 8px; }
     .seats-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
 
-    .seats-grid { display: inline-block; margin: 20px 0; white-space: nowrap; max-width: none; }
+    .seats-grid {
+        display: block;
+        width: 100%;
+        margin: 20px 0;
+        /* larghezza teorica di un posto: serve solo per dimensionare i font */
+        --seat-w: calc((100cqi - var(--row-label-w)
+                        - var(--corr-n) * (var(--corr-w) + var(--seat-gap))
+                        - var(--colonne) * var(--seat-gap)) / var(--colonne));
+    }
 
-    /* Righe in flex con GAP: nessun margin-right sui singoli posti,
-       quindi la larghezza reale coincide sempre con quella prevista
-       e il bordo destro non viene mai tagliato. */
-    .seat-row { display: flex; align-items: center; gap: var(--seat-gap); margin-bottom: var(--seat-gap); }
+    /* Riga: flex con gap, ancorata a SINISTRA (cosi' se serve lo scroll
+       il contenuto eccedente va sempre a destra, mai tagliato a sinistra) */
+    .seat-row {
+        display: flex;
+        align-items: center;
+        gap: var(--seat-gap);
+        margin-bottom: var(--seat-gap);
+        width: 100%;
+        min-width: min-content;
+    }
     .row-label {
-        width: var(--row-label-w); min-width: var(--row-label-w);
+        flex: 0 0 var(--row-label-w);
         text-align: center; font-weight: bold; color: #475569; font-size: 0.9em;
     }
 
-    /* Numeri di colonna in testata: stesso flex/gap delle righe posti */
-    .col-num { width: var(--seat); min-width: var(--seat); text-align: center; font-size: 0.7em; color: #94a3b8; font-weight: 600; }
+    /* Numeri di colonna in testata: stesso comportamento flessibile dei posti */
+    .col-num {
+        flex: 1 1 0; min-width: 0;
+        text-align: center; font-size: 0.7em; color: #94a3b8; font-weight: 600;
+        max-width: var(--seat-max);
+    }
 
+    /* POSTO FLUIDO: occupa 1 quota uguale degli altri posti della riga.
+       aspect-ratio mantiene la forma quadrata a qualunque larghezza. */
     .seat {
-        width: var(--seat); height: var(--seat);
-        min-width: var(--seat); min-height: var(--seat);
+        flex: 1 1 0;
+        min-width: var(--seat-min);
+        max-width: var(--seat-max);
+        aspect-ratio: 1 / 1;
+        min-height: var(--seat-min);
         border-radius: 8px;
         display: flex; flex-direction: column;
         align-items: center; justify-content: center;
-        font-size: calc(var(--seat) * 0.18);
+        font-size: calc(var(--seat-w) * 0.22);
         font-weight: 600;
+        line-height: 1.1;
         transition: all 0.2s;
         border: 2px solid transparent;
         user-select: none;
@@ -95,8 +118,8 @@
         flex-shrink: 0;
     }
 
-    /* Placeholder per celle mancanti (stessa dimensione di un posto) */
-    .seat-placeholder { width: var(--seat); min-width: var(--seat); height: var(--seat); flex-shrink: 0; }
+    /* Placeholder per celle mancanti: stessa quota flessibile di un posto */
+    .seat-placeholder { flex: 1 1 0; min-width: var(--seat-min); max-width: var(--seat-max); flex-shrink: 0; }
 
     .legend { display: flex; gap: 20px; margin: 15px 0; flex-wrap: wrap; justify-content: center; }
     .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.9em; }
@@ -104,13 +127,13 @@
 
     /* Libero - bianco, cliccabile */
     .seat.libero { background: #ffffff; border-color: #bdc3c7; color: #333; cursor: pointer; }
-    .seat.libero:hover { background: #ecf0f1; transform: scale(1.1); }
+    .seat.libero:hover { background: #ecf0f1; }
 
     /* Selezionato - verde acqua */
-    .seat.selezionato { background: #1abc9c !important; color: white !important; border-color: #16a085 !important; cursor: pointer; transform: scale(1.1); box-shadow: 0 4px 12px rgba(26, 188, 156, 0.4); }
+    .seat.selezionato { background: #1abc9c !important; color: white !important; border-color: #16a085 !important; cursor: pointer; box-shadow: 0 4px 12px rgba(26, 188, 156, 0.4); }
 
     /* Selezionato per CANCELLAZIONE - rosso lampeggiante */
-    .seat.selezionato-canc { animation: pulse-red 0.8s ease-in-out infinite alternate; cursor: pointer; transform: scale(1.1); z-index: 10; }
+    .seat.selezionato-canc { animation: pulse-red 0.8s ease-in-out infinite alternate; cursor: pointer; z-index: 10; }
     @keyframes pulse-red {
         from { box-shadow: 0 0 0 3px #e74c3c, 0 4px 12px rgba(231, 76, 60, 0.3); }
         to { box-shadow: 0 0 0 6px #e74c3c, 0 4px 16px rgba(231, 76, 60, 0.6); }
@@ -133,7 +156,7 @@
     .seat.admin-canc:hover { opacity: 0.9; }
 
     .seat .nome-pren {
-        font-size: calc(var(--seat) * 0.13);
+        font-size: calc(var(--seat-w) * 0.16);
         max-width: 95%;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
@@ -166,8 +189,12 @@
     .btn-cancel { background: #95a5a6; color: white; padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; }
     .btn-confirm { background: #3498db; color: white; padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; }
 
-    /* Corridoi (flex item dentro le righe: nessun margine, gestiti dal gap) */
-    .corridoio-col { width: var(--corr-w); min-width: var(--corr-w); height: var(--seat); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    /* Corridoi: larghezza fissa, si stirano in altezza con la riga */
+    .corridoio-col {
+        flex: 0 0 var(--corr-w);
+        align-self: stretch;
+        display: flex; align-items: center; justify-content: center;
+    }
     .corridoio-row { width: 100%; height: var(--corr-h); display: flex; align-items: center; justify-content: center; margin: var(--seat-gap) 0; }
 
     /* ===== MEDIA QUERY MOBILE ===== */
@@ -211,7 +238,9 @@
     </div>
 
     <div class="seats-scroll">
-        <div id="seats-container" class="seats-grid"></div>
+        <!-- --colonne e --corr-n dicono al CSS la geometria della sala: nessun JS necessario -->
+        <div id="seats-container" class="seats-grid"
+             style="--colonne: {{ evento.colonne }}; --corr-n: {{ evento.corridoio_colonne.split(',')|length if evento.corridoio_colonne else 0 }};"></div>
     </div>
 
     <div class="actions">
@@ -266,10 +295,9 @@ function parseCorridoi(str) {
     return str.split(',').map(function(x) { return parseInt(x.trim(), 10); }).filter(function(x) { return !isNaN(x); });
 }
 
-/* Le dimensioni della griglia sono gestite interamente dal CSS inline
-   (variabili --seat / --seat-gap / --corr-w con media query).
-   Qui NON si fa alcun calcolo dimensionale: così lo zoom da smartphone
-   non puo' mai tagliare il bordo destro della griglia. */
+/* NESSUN calcolo dimensionale in JS: la griglia e' fluida via CSS flex.
+   I posti riempiono sempre la larghezza disponibile, a qualunque zoom
+   e orientamento. Questa funzione e' solo di utilita' per il render. */
 
 function loadSeats() {
     fetch(`/api/seats/${EVENTO_ID}`)
@@ -293,7 +321,7 @@ function renderSeats(posti) {
 
     let html = '';
 
-    // Header numeri colonna (stesso flex/gap delle righe posti -> allineamento perfetto)
+    // Header numeri colonna (stesso flex dei posti -> allineamento perfetto)
     html += `<div class="seat-row" style="margin-bottom:6px;">
         <div class="row-label"></div>`;
     for (let c = 1; c <= colonne; c++) {
@@ -349,7 +377,7 @@ function renderSeats(posti) {
             </div>`;
 
             if (corrCol.includes(c)) {
-                html += `<div class="corridoio-col"><div style="width:8px; height:80%; background: repeating-linear-gradient(0deg, #e2e8f0, #e2e8f0 6px, #f1f5f9 6px, #f1f5f9 12px); border-radius:4px; opacity:0.6;"></div></div>`;
+                html += `<div class="corridoio-col"><div style="width:8px; height:70%; background: repeating-linear-gradient(0deg, #e2e8f0, #e2e8f0 6px, #f1f5f9 6px, #f1f5f9 12px); border-radius:4px; opacity:0.6;"></div></div>`;
             }
         }
 
