@@ -59,7 +59,6 @@
         padding-bottom: 8px;
         width: 100%;
         scrollbar-width: thin;
-        container-type: inline-size;
     }
     .seats-scroll::-webkit-scrollbar { height: 8px; }
     .seats-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
@@ -68,6 +67,7 @@
         display: block;
         width: 100%;
         margin: 20px 0;
+        container-type: inline-size;   /* 100cqi qui = larghezza GRIGLIA (che col zoom segue il visual viewport) */
         /* larghezza teorica di un posto: serve solo per dimensionare i font */
         --seat-w: calc((100cqi - var(--row-label-w)
                         - var(--corr-n) * (var(--corr-w) + var(--seat-gap))
@@ -107,6 +107,7 @@
         border-radius: 8px;
         display: flex; flex-direction: column;
         align-items: center; justify-content: center;
+        font-size: 10px; /* fallback */
         font-size: calc(var(--seat-w) * 0.22);
         font-weight: 600;
         line-height: 1.1;
@@ -156,6 +157,7 @@
     .seat.admin-canc:hover { opacity: 0.9; }
 
     .seat .nome-pren {
+        font-size: 9px; /* fallback */
         font-size: calc(var(--seat-w) * 0.16);
         max-width: 95%;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -295,9 +297,45 @@ function parseCorridoi(str) {
     return str.split(',').map(function(x) { return parseInt(x.trim(), 10); }).filter(function(x) { return !isNaN(x); });
 }
 
-/* NESSUN calcolo dimensionale in JS: la griglia e' fluida via CSS flex.
-   I posti riempiono sempre la larghezza disponibile, a qualunque zoom
-   e orientamento. Questa funzione e' solo di utilita' per il render. */
+/* La griglia e' fluida via CSS flex, ma il pinch-zoom da smartphone non
+   cambia il layout viewport: per far restare la griglia larga esattamente
+   quanto la parte VISIBILE dello schermo (e far restringere i posti invece
+   di scrollare), questo handler copia larghezza e posizione del visual
+   viewport in due variabili/inline style. Agisce SOLO quando lo zoom
+   e' attivo (vv.width < larghezza contenitore); a zoom 1 non tocca nulla. */
+function adattaGrigliaAlViewport() {
+    const grid = document.getElementById('seats-container');
+    const vv = window.visualViewport;
+    if (!grid || !vv) return;
+
+    const scroll = grid.closest('.seats-scroll');
+    const layoutW = scroll ? scroll.clientWidth : document.documentElement.clientWidth;
+
+    if (vv.width >= layoutW - 1) {
+        // zoom non attivo (o zoom-out totale): la griglia torna 100% CSS
+        grid.style.width = '';
+        grid.style.marginLeft = '';
+        grid.style.setProperty('--seat-min', '');
+        return;
+    }
+
+    // Zoom attivo: la griglia e' larga quanto la parte visibile...
+    grid.style.width = Math.round(vv.width) + 'px';
+    // ...e segue il pan orizzontale (offsetLeft) cosi' resta sempre a schermo
+    grid.style.marginLeft = Math.round(vv.offsetLeft) + 'px';
+
+    // Posti ridotti per far entrare TUTTE le colonne senza scroll:
+    // il min-width dinamico scende in proporzione allo spazio disponibile.
+    const colonne = parseInt(getComputedStyle(grid).getPropertyValue('--colonne'), 10) || 10;
+    const minSeat = Math.max(8, Math.floor((vv.width - 40) / colonne * 0.6));
+    grid.style.setProperty('--seat-min', minSeat + 'px');
+}
+
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', adattaGrigliaAlViewport);
+    window.visualViewport.addEventListener('scroll', adattaGrigliaAlViewport);
+    window.addEventListener('resize', adattaGrigliaAlViewport);
+}
 
 function loadSeats() {
     fetch(`/api/seats/${EVENTO_ID}`)
@@ -393,6 +431,7 @@ function renderSeats(posti) {
     selectedSeats = [];
     selectedToDelete = [];
     updateButtons();
+    adattaGrigliaAlViewport();
 }
 
 function toggleSeat(el) {
