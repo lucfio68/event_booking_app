@@ -1236,4 +1236,2050 @@ def _ultima_fila_libera(evento):
 
 def _ultima_colonna_libera(evento):
     occupati = Posto.query.filter(
-        Posto.evento_
+        Posto.evento_id == evento.id,
+        Posto.colonna == evento.colonne,
+        Posto.stato != 'libero'
+    ).count()
+    return occupati == 0
+
+
+@app.route('/event/create', methods=['GET', 'POST'])
+@login_required
+def create_event():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    if request.method == 'POST':
+        nome = request.form.get('nome', '').strip()
+        descrizione = request.form.get('descrizione', '').strip()
+        data_evento = request.form.get('data_evento')
+        ora_inizio = request.form.get('ora_inizio')
+        durata = request.form.get('durata', type=int)
+        sala_id = request.form.get('sala_id', type=int)
+        file = request.form.get('file', type=int)
+        colonne = request.form.get('colonne', type=int)
+        layout_id = request.form.get('layout_id', type=int) or None
+        genere_evento_id = request.form.get('genere_evento_id', type=int) or None
+        gestore_id = request.form.get('gestore_id', type=int) or None
+        overbooking_abilitato = request.form.get('overbooking_abilitato') == 'on'
+        salva_layout_nome = request.form.get('salva_layout_nome', '').strip()
+
+        if not all([nome, data_evento, ora_inizio, durata, sala_id, file, colonne]):
+            flash('Tutti i campi sono obbligatori.', 'danger')
+            return redirect(url_for('create_event'))
+        if file < 1 or file > 26 or colonne < 1:
+            flash('File deve essere tra 1 e 26, colonne almeno 1.', 'danger')
+            return redirect(url_for('create_event'))
+
+        sala = db.session.get(Sala, sala_id)
+        if not sala:
+            flash('Sala non trovata.', 'danger')
+            return redirect(url_for('create_event'))
+
+        layout_scelto = None
+        if layout_id:
+            layout_scelto = db.session.get(LayoutPosti, layout_id)
+            if not layout_scelto or layout_scelto.sala_id != sala_id:
+                layout_scelto = None
+                layout_id = None
+
+        posti_max = file * colonne
+        limite = sala.posti_max + (sala.overbooking_max if overbooking_abilitato else 0)
+
+        if posti_max > limite:
+            if overbooking_abilitato:
+                flash(
+                    f"I posti calcolati ({posti_max}) superano anche il limite di overbooking "
+                    f"consentito per questa sala ({limite}).", 'danger'
+                )
+            else:
+                flash(
+                    f"I posti calcolati ({posti_max}) superano la capacita' della sala ({sala.posti_max}). "
+                    f"Abilita l'overbooking se vuoi superarla (fino a {sala.posti_max + sala.overbooking_max}).",
+                    'danger'
+                )
+            return redirect(url_for('create_event'))
+
+        try:
+            data_obj = datetime.strptime(data_evento, '%Y-%m-%d').date()
+        except ValueError:
+            flash('Formato data non valido.', 'danger')
+            return redirect(url_for('create_event'))
+
+        if data_obj < date.today():
+            flash("Non e' possibile creare eventi nel passato.", 'danger')
+            return redirect(url_for('create_event'))
+
+        try:
+            ora_obj = datetime.strptime(ora_inizio, '%H:%M').time()
+        except ValueError:
+            flash('Formato ora non valido.', 'danger')
+            return redirect(url_for('create_event'))
+
+        corridoio_colonne = request.form.get('corridoio_colonne', '').strip()
+        corridoio_file = request.form.get('corridoio_file', '').strip()
+
+        evento = Evento(
+            nome=nome, descrizione=descrizione, data_evento=data_obj,
+            ora_inizio=ora_obj, durata=durata, posti_max=posti_max,
+            file=file, colonne=colonne,
+            corridoio_colonne=corridoio_colonne, corridoio_file=corridoio_file,
+            sala_id=sala_id, creato_da=current_user.id,
+            layout_posti_id=layout_id, genere_evento_id=genere_evento_id,
+            gestore_id=gestore_id,
+            overbooking_abilitato=overbooking_abilitato
+        )
+        db.session.add(evento)
+        db.session.flush()
+
+        if not layout_id and salva_layout_nome:
+            nuovo_layout = LayoutPosti(
+                sala_id=sala_id,
+                genere_evento_id=genere_evento_id,
+                nome=salva_layout_nome,
+                file=file, colonne=colonne,
+                corridoio_colonne=corridoio_colonne, corridoio_file=corridoio_file,
+                overbooking_abilitato=overbooking_abilitato,
+                is_default=False,
+                creato_da=current_user.id
+            )
+            db.session.add(nuovo_layout)
+            db.session.flush()
+            evento.layout_posti_id = nuovo_layout.id
+
+        numero = 1
+        posti_bulk = []
+        for f in range(1, file + 1):
+            fila_lettera = chr(64 + f)
+            for c in range(1, colonne + 1):
+                posti_bulk.append(Posto(
+                    sala_id=sala_id, evento_id=evento.id, numero_posto=numero,
+                    fila=fila_lettera, colonna=c, stato='libero'
+                ))
+                numero += 1
+
+        db.session.add_all(posti_bulk)
+        db.session.commit()
+        flash('Evento creato con successo!', 'success')
+        return redirect(url_for('calendar_view'))
+
+    sale = Sala.query.order_by(Sala.nome).all()
+    generi = GenereEvento.query.order_by(GenereEvento.nome).all()
+    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
+    layouts = LayoutPosti.query.all()
+    real_today = date.today().strftime('%Y-%m-%d')
+    selected_date = request.args.get('date', '')
+    return render_template(
+        'event_create.html', sale=sale, generi=generi, gestori=gestori, layouts=layouts,
+        today=real_today, selected_date=selected_date
+    )
+
+
+@app.route('/admin/event/<int:event_id>/layout')
+@login_required
+def admin_evento_layout(event_id):
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+    sala = evento.sala
+
+    return render_template(
+        'admin_evento_layout.html',
+        evento=evento, sala=sala,
+        ultima_fila_libera=_ultima_fila_libera(evento) if evento.file > 1 else False,
+        ultima_colonna_libera=_ultima_colonna_libera(evento) if evento.colonne > 1 else False
+    )
+
+
+@app.route('/admin/event/<int:event_id>/layout/aggiungi-file', methods=['POST'])
+@login_required
+def admin_evento_aggiungi_file(event_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+    sala = evento.sala
+
+    n = request.form.get('numero', type=int) or 1
+    if n < 1:
+        flash('Numero di file da aggiungere non valido.', 'danger')
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    overbooking_abilitato = request.form.get('overbooking_abilitato') == 'on'
+    nuovo_file = evento.file + n
+    nuovo_posti_max = nuovo_file * evento.colonne
+    limite = sala.posti_max + (sala.overbooking_max if overbooking_abilitato else 0)
+
+    if nuovo_posti_max > limite:
+        flash(
+            f"Aggiungendo {n} file arriveresti a {nuovo_posti_max} posti, oltre il limite consentito "
+            f"({limite}{' con overbooking' if overbooking_abilitato else ''}).", 'danger'
+        )
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    if nuovo_file > 26:
+        flash('Non è possibile superare 26 file (lettere A-Z).', 'danger')
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    ultimo_numero = db.session.query(func.max(Posto.numero_posto)).filter_by(evento_id=event_id).scalar() or 0
+    nuovi_posti = []
+    for f in range(evento.file + 1, nuovo_file + 1):
+        fila_lettera = chr(64 + f)
+        for c in range(1, evento.colonne + 1):
+            ultimo_numero += 1
+            nuovi_posti.append(Posto(
+                sala_id=evento.sala_id, evento_id=event_id, numero_posto=ultimo_numero,
+                fila=fila_lettera, colonna=c, stato='libero'
+            ))
+
+    evento.file = nuovo_file
+    evento.posti_max = nuovo_posti_max
+    if overbooking_abilitato:
+        evento.overbooking_abilitato = True
+
+    db.session.add_all(nuovi_posti)
+    db.session.commit()
+    flash(f"Aggiunte {n} file ({len(nuovi_posti)} nuovi posti).", 'success')
+    return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+
+@app.route('/admin/event/<int:event_id>/layout/aggiungi-colonne', methods=['POST'])
+@login_required
+def admin_evento_aggiungi_colonne(event_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+    sala = evento.sala
+
+    n = request.form.get('numero', type=int) or 1
+    if n < 1:
+        flash('Numero di colonne da aggiungere non valido.', 'danger')
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    overbooking_abilitato = request.form.get('overbooking_abilitato') == 'on'
+    nuove_colonne = evento.colonne + n
+    nuovo_posti_max = evento.file * nuove_colonne
+    limite = sala.posti_max + (sala.overbooking_max if overbooking_abilitato else 0)
+
+    if nuovo_posti_max > limite:
+        flash(
+            f"Aggiungendo {n} colonne arriveresti a {nuovo_posti_max} posti, oltre il limite consentito "
+            f"({limite}{' con overbooking' if overbooking_abilitato else ''}).", 'danger'
+        )
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    ultimo_numero = db.session.query(func.max(Posto.numero_posto)).filter_by(evento_id=event_id).scalar() or 0
+    nuovi_posti = []
+    for f in range(1, evento.file + 1):
+        fila_lettera = chr(64 + f)
+        for c in range(evento.colonne + 1, nuove_colonne + 1):
+            ultimo_numero += 1
+            nuovi_posti.append(Posto(
+                sala_id=evento.sala_id, evento_id=event_id, numero_posto=ultimo_numero,
+                fila=fila_lettera, colonna=c, stato='libero'
+            ))
+
+    evento.colonne = nuove_colonne
+    evento.posti_max = nuovo_posti_max
+    if overbooking_abilitato:
+        evento.overbooking_abilitato = True
+
+    db.session.add_all(nuovi_posti)
+    db.session.commit()
+    flash(f"Aggiunte {n} colonne ({len(nuovi_posti)} nuovi posti).", 'success')
+    return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+
+@app.route('/admin/event/<int:event_id>/layout/rimuovi-file', methods=['POST'])
+@login_required
+def admin_evento_rimuovi_file(event_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+
+    if evento.file <= 1:
+        flash("Non puoi rimuovere l'unica fila rimasta.", 'danger')
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    ultima_fila = chr(64 + evento.file)
+
+    try:
+        posti_ultima_fila = Posto.query.filter(
+            Posto.evento_id == event_id,
+            Posto.fila == ultima_fila
+        ).with_for_update().all()
+
+        occupati = [p for p in posti_ultima_fila if p.stato != 'libero']
+        if occupati:
+            db.session.rollback()
+            flash(
+                f"Impossibile rimuovere l'ultima fila ({ultima_fila}): {len(occupati)} posti non sono liberi. "
+                f"Libera o sposta prima quelle prenotazioni.", 'danger'
+            )
+            return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+        for p in posti_ultima_fila:
+            db.session.delete(p)
+
+        evento.file -= 1
+        evento.posti_max = evento.file * evento.colonne
+        db.session.commit()
+        flash(f"Fila {ultima_fila} rimossa ({len(posti_ultima_fila)} posti eliminati).", 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Errore durante la rimozione: {str(e)}", 'danger')
+
+    return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+
+@app.route('/admin/event/<int:event_id>/layout/rimuovi-colonna', methods=['POST'])
+@login_required
+def admin_evento_rimuovi_colonna(event_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+
+    if evento.colonne <= 1:
+        flash("Non puoi rimuovere l'unica colonna rimasta.", 'danger')
+        return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+    ultima_colonna = evento.colonne
+
+    try:
+        posti_ultima_colonna = Posto.query.filter(
+            Posto.evento_id == event_id,
+            Posto.colonna == ultima_colonna
+        ).with_for_update().all()
+
+        occupati = [p for p in posti_ultima_colonna if p.stato != 'libero']
+        if occupati:
+            db.session.rollback()
+            flash(
+                f"Impossibile rimuovere l'ultima colonna ({ultima_colonna}): {len(occupati)} posti non sono liberi. "
+                f"Libera o sposta prima quelle prenotazioni.", 'danger'
+            )
+            return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+        for p in posti_ultima_colonna:
+            db.session.delete(p)
+
+        evento.colonne -= 1
+        evento.posti_max = evento.file * evento.colonne
+        db.session.commit()
+        flash(f"Colonna {ultima_colonna} rimossa ({len(posti_ultima_colonna)} posti eliminati).", 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Errore durante la rimozione: {str(e)}", 'danger')
+
+    return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+
+@app.route('/admin/event/<int:event_id>/layout/corridoi', methods=['POST'])
+@login_required
+def admin_evento_corridoi(event_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+
+    evento.corridoio_colonne = request.form.get('corridoio_colonne', '').strip()
+    evento.corridoio_file = request.form.get('corridoio_file', '').strip()
+    db.session.commit()
+    flash('Corridoi aggiornati.', 'success')
+    return redirect(url_for('admin_evento_layout', event_id=event_id))
+
+
+@app.route('/api/event/delete/<int:event_id>', methods=['POST'])
+@login_required
+@limiter.limit("10 per minute")
+def api_delete_event(event_id):
+    if not current_user.is_admin():
+        return jsonify({'error': 'Solo gli amministratori possono eliminare eventi'}), 403
+
+    try:
+        evento = db.session.get(Evento, event_id)
+        if not evento:
+            return jsonify({'error': 'Evento non trovato'}), 404
+
+        prenotazioni = Prenotazione.query.filter_by(evento_id=event_id).all()
+        for p in prenotazioni:
+            posti = Posto.query.filter_by(prenotazione_id=p.id).all()
+            for posto in posti:
+                posto.stato = 'libero'
+                posto.prenotazione_id = None
+            db.session.delete(p)
+
+        posti_evento = Posto.query.filter_by(evento_id=event_id).all()
+        for posto in posti_evento:
+            db.session.delete(posto)
+
+        db.session.delete(evento)
+        db.session.commit()
+
+        return jsonify({'success': True, 'message': 'Evento eliminato con successo'})
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Errore eliminazione evento: {e}")
+        return jsonify({"error": "Errore interno durante l'eliminazione"}), 500
+
+
+# ==============================================================================
+# 8. GESTIONE GENERI, GESTORI, SALE E LAYOUT SALVATI (ADMIN)
+# ==============================================================================
+
+LOGO_MAX_BYTES = 2 * 1024 * 1024  # 2 MB
+LOGO_MIMETYPES_AMMESSI = {'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'}
+
+
+def _salva_logo_da_form(oggetto, campo_file='logo', campo_rimuovi='rimuovi_logo'):
+    if request.form.get(campo_rimuovi) == 'on':
+        oggetto.logo = None
+        oggetto.logo_mimetype = None
+        return None
+
+    file = request.files.get(campo_file)
+    if file and file.filename:
+        dati = file.read()
+        if len(dati) > LOGO_MAX_BYTES:
+            return f'Il file "{file.filename}" supera i {LOGO_MAX_BYTES // (1024*1024)} MB consentiti.'
+        mimetype = file.mimetype or ''
+        if mimetype not in LOGO_MIMETYPES_AMMESSI:
+            return f'Formato "{mimetype}" non supportato. Usa PNG, JPG, GIF, WEBP o SVG.'
+        oggetto.logo = dati
+        oggetto.logo_mimetype = mimetype
+    return None
+
+
+@app.route('/gestore/<int:gestore_id>/logo')
+def logo_gestore(gestore_id):
+    gestore = db.session.get(Gestore, gestore_id)
+    if not gestore or not gestore.logo:
+        abort(404)
+    return Response(gestore.logo, mimetype=gestore.logo_mimetype or 'application/octet-stream')
+
+
+@app.route('/genere/<int:genere_id>/logo')
+def logo_genere(genere_id):
+    genere = db.session.get(GenereEvento, genere_id)
+    if not genere or not genere.logo:
+        abort(404)
+    return Response(genere.logo, mimetype=genere.logo_mimetype or 'application/octet-stream')
+
+
+@app.route('/admin/gestori')
+@login_required
+def admin_gestori():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
+    modifica_id = request.args.get('modifica', type=int)
+    gestore_da_modificare = db.session.get(Gestore, modifica_id) if modifica_id else None
+
+    return render_template('admin_gestori.html', gestori=gestori, gestore_da_modificare=gestore_da_modificare)
+
+
+@app.route('/admin/gestori/add', methods=['POST'])
+@login_required
+def admin_gestori_add():
+    if not current_user.is_admin():
+        abort(403)
+
+    ragione_sociale = (request.form.get('ragione_sociale') or '').strip()
+    if not ragione_sociale:
+        flash('La ragione sociale è obbligatoria.', 'danger')
+        return redirect(url_for('admin_gestori'))
+
+    gestore = Gestore(
+        ragione_sociale=ragione_sociale,
+        indirizzo=(request.form.get('indirizzo') or '').strip() or None,
+        cf_piva=(request.form.get('cf_piva') or '').strip() or None,
+        cellulare=(request.form.get('cellulare') or '').strip() or None,
+        email=(request.form.get('email') or '').strip() or None,
+        pec=(request.form.get('pec') or '').strip() or None,
+        certificazioni=(request.form.get('certificazioni') or '').strip() or None,
+        creato_da=current_user.id,
+    )
+
+    errore = _salva_logo_da_form(gestore)
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_gestori'))
+
+    db.session.add(gestore)
+    db.session.commit()
+    flash(f'Gestore "{gestore.ragione_sociale}" creato.', 'success')
+    return redirect(url_for('admin_gestori'))
+
+
+@app.route('/admin/gestori/<int:gestore_id>/edit', methods=['POST'])
+@login_required
+def admin_gestori_edit(gestore_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    gestore = db.session.get(Gestore, gestore_id)
+    if not gestore:
+        abort(404)
+
+    ragione_sociale = (request.form.get('ragione_sociale') or '').strip()
+    if not ragione_sociale:
+        flash('La ragione sociale è obbligatoria.', 'danger')
+        return redirect(url_for('admin_gestori', modifica=gestore_id))
+
+    gestore.ragione_sociale = ragione_sociale
+    gestore.indirizzo = (request.form.get('indirizzo') or '').strip() or None
+    gestore.cf_piva = (request.form.get('cf_piva') or '').strip() or None
+    gestore.cellulare = (request.form.get('cellulare') or '').strip() or None
+    gestore.email = (request.form.get('email') or '').strip() or None
+    gestore.pec = (request.form.get('pec') or '').strip() or None
+    gestore.certificazioni = (request.form.get('certificazioni') or '').strip() or None
+
+    errore = _salva_logo_da_form(gestore)
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_gestori', modifica=gestore_id))
+
+    db.session.commit()
+    flash(f'Gestore "{gestore.ragione_sociale}" aggiornato.', 'success')
+    return redirect(url_for('admin_gestori'))
+
+
+@app.route('/admin/gestori/<int:gestore_id>/delete', methods=['POST'])
+@login_required
+def admin_gestori_delete(gestore_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    gestore = db.session.get(Gestore, gestore_id)
+    if not gestore:
+        abort(404)
+
+    db.session.delete(gestore)
+    db.session.commit()
+    flash('Gestore eliminato.', 'success')
+    return redirect(url_for('admin_gestori'))
+
+
+@app.route('/admin/generi')
+@login_required
+def admin_generi():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    generi = (
+        GenereEvento.query
+        .outerjoin(Gestore, GenereEvento.gestore_id == Gestore.id)
+        .order_by(Gestore.ragione_sociale.asc().nullslast(), GenereEvento.nome.asc())
+        .all()
+    )
+    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
+    modifica_id = request.args.get('modifica', type=int)
+    genere_da_modificare = db.session.get(GenereEvento, modifica_id) if modifica_id else None
+    return render_template('admin_generi.html', generi=generi, gestori=gestori, genere_da_modificare=genere_da_modificare)
+
+
+@app.route('/admin/generi/add', methods=['POST'])
+@login_required
+def admin_generi_add():
+    if not current_user.is_admin():
+        abort(403)
+
+    nome = request.form.get('nome', '').strip()
+    descrizione = request.form.get('descrizione', '').strip()
+    descrizione_aggiuntiva = request.form.get('descrizione_aggiuntiva', '').strip()
+    gestore_id = request.form.get('gestore_id', type=int) or None
+
+    if not nome:
+        flash('Il nome del genere è obbligatorio.', 'danger')
+        return redirect(url_for('admin_generi'))
+
+    if GenereEvento.query.filter(
+        func.lower(GenereEvento.nome) == nome.lower(),
+        GenereEvento.gestore_id == gestore_id
+    ).first():
+        flash(f"Esiste già un genere chiamato '{nome}' per questo gestore.", 'danger')
+        return redirect(url_for('admin_generi'))
+
+    genere = GenereEvento(
+        nome=nome, descrizione=descrizione or None,
+        descrizione_aggiuntiva=descrizione_aggiuntiva or None,
+        gestore_id=gestore_id,
+    )
+
+    errore = _salva_logo_da_form(genere)
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_generi'))
+
+    db.session.add(genere)
+    db.session.commit()
+    flash(f"Genere '{nome}' creato.", 'success')
+    return redirect(url_for('admin_generi'))
+
+
+@app.route('/admin/generi/<int:genere_id>/edit', methods=['POST'])
+@login_required
+def admin_generi_edit(genere_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    genere = db.session.get(GenereEvento, genere_id)
+    if not genere:
+        abort(404)
+
+    nome = request.form.get('nome', '').strip()
+    if not nome:
+        flash('Il nome del genere è obbligatorio.', 'danger')
+        return redirect(url_for('admin_generi', modifica=genere_id))
+
+    gestore_id = request.form.get('gestore_id', type=int) or None
+
+    duplicato = GenereEvento.query.filter(
+        func.lower(GenereEvento.nome) == nome.lower(),
+        GenereEvento.gestore_id == gestore_id,
+        GenereEvento.id != genere_id
+    ).first()
+    if duplicato:
+        flash(f"Esiste già un genere chiamato '{nome}' per questo gestore.", 'danger')
+        return redirect(url_for('admin_generi', modifica=genere_id))
+
+    genere.nome = nome
+    genere.descrizione = request.form.get('descrizione', '').strip() or None
+    genere.descrizione_aggiuntiva = request.form.get('descrizione_aggiuntiva', '').strip() or None
+    genere.gestore_id = gestore_id
+
+    errore = _salva_logo_da_form(genere)
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_generi', modifica=genere_id))
+
+    db.session.commit()
+    flash(f"Genere '{nome}' aggiornato.", 'success')
+    return redirect(url_for('admin_generi'))
+
+
+@app.route('/admin/generi/delete/<int:genere_id>', methods=['POST'])
+@login_required
+def admin_generi_delete(genere_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    genere = db.session.get(GenereEvento, genere_id)
+    if not genere:
+        abort(404)
+
+    layout_collegati = LayoutPosti.query.filter_by(genere_evento_id=genere_id).count()
+    if layout_collegati > 0:
+        flash(
+            f"Impossibile eliminare '{genere.nome}': è collegato a {layout_collegati} layout esistenti. "
+            f"Scollega prima quei layout.",
+            'danger'
+        )
+        return redirect(url_for('admin_generi'))
+
+    eventi_collegati = Evento.query.filter_by(genere_evento_id=genere_id).count()
+    if eventi_collegati > 0:
+        flash(
+            f"Impossibile eliminare '{genere.nome}': è collegato a {eventi_collegati} eventi esistenti.",
+            'danger'
+        )
+        return redirect(url_for('admin_generi'))
+
+    nome = genere.nome
+    db.session.delete(genere)
+    db.session.commit()
+    flash(f"Genere '{nome}' eliminato.", 'success')
+    return redirect(url_for('admin_generi'))
+
+
+def _imposta_layout_default(layout):
+    altri = LayoutPosti.query.filter(
+        LayoutPosti.sala_id == layout.sala_id,
+        LayoutPosti.genere_evento_id == layout.genere_evento_id,
+        LayoutPosti.id != layout.id
+    ).all()
+    for altro in altri:
+        altro.is_default = False
+    layout.is_default = True
+
+
+@app.route('/admin/layout-posti')
+@login_required
+def admin_layout_posti():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    sale = Sala.query.order_by(Sala.nome).all()
+    generi = GenereEvento.query.order_by(GenereEvento.nome).all()
+
+    sala_id = request.args.get('sala_id', type=int)
+    sala_selezionata = None
+    layouts = []
+
+    if sala_id:
+        sala_selezionata = db.session.get(Sala, sala_id)
+        if sala_selezionata:
+            layouts = LayoutPosti.query.filter_by(sala_id=sala_id) \
+                .order_by(LayoutPosti.is_default.desc(), LayoutPosti.nome).all()
+
+    return render_template(
+        'admin_layout_posti.html',
+        sale=sale, generi=generi,
+        sala_selezionata=sala_selezionata, layouts=layouts
+    )
+
+
+@app.route('/admin/layout-posti/add', methods=['POST'])
+@login_required
+def admin_layout_posti_add():
+    if not current_user.is_admin():
+        abort(403)
+
+    sala_id = request.form.get('sala_id', type=int)
+    genere_evento_id = request.form.get('genere_evento_id', type=int) or None
+    nome = request.form.get('nome', '').strip()
+    file = request.form.get('file', type=int)
+    colonne = request.form.get('colonne', type=int)
+    corridoio_colonne = request.form.get('corridoio_colonne', '').strip()
+    corridoio_file = request.form.get('corridoio_file', '').strip()
+    overbooking_abilitato = request.form.get('overbooking_abilitato') == 'on'
+    is_default = request.form.get('is_default') == 'on'
+
+    redirect_url = url_for('admin_layout_posti', sala_id=sala_id)
+
+    if not all([sala_id, nome, file, colonne]):
+        flash('Sala, nome, file e colonne sono campi obbligatori.', 'danger')
+        return redirect(redirect_url)
+
+    if file < 1 or file > 26 or colonne < 1:
+        flash('File deve essere tra 1 e 26, colonne almeno 1.', 'danger')
+        return redirect(redirect_url)
+
+    sala = db.session.get(Sala, sala_id)
+    if not sala:
+        flash('Sala non trovata.', 'danger')
+        return redirect(url_for('admin_layout_posti'))
+
+    posti_totali = file * colonne
+    limite = sala.posti_max + (sala.overbooking_max if overbooking_abilitato else 0)
+
+    if posti_totali > limite:
+        if overbooking_abilitato:
+            flash(
+                f"I posti calcolati ({posti_totali}) superano anche il limite di overbooking "
+                f"consentito per questa sala ({limite}).", 'danger'
+            )
+        else:
+            flash(
+                f"I posti calcolati ({posti_totali}) superano la capacità della sala ({sala.posti_max}). "
+                f"Abilita l'overbooking se vuoi superarla (fino a {sala.posti_max + sala.overbooking_max}).",
+                'danger'
+            )
+        return redirect(redirect_url)
+
+    layout = LayoutPosti(
+        sala_id=sala_id,
+        genere_evento_id=genere_evento_id,
+        nome=nome,
+        file=file,
+        colonne=colonne,
+        corridoio_colonne=corridoio_colonne,
+        corridoio_file=corridoio_file,
+        overbooking_abilitato=overbooking_abilitato,
+        is_default=False,
+        creato_da=current_user.id
+    )
+    db.session.add(layout)
+    db.session.flush()
+
+    if is_default:
+        _imposta_layout_default(layout)
+
+    db.session.commit()
+    flash(f"Layout '{nome}' creato.", 'success')
+    return redirect(redirect_url)
+
+
+@app.route('/admin/layout-posti/set-default/<int:layout_id>', methods=['POST'])
+@login_required
+def admin_layout_posti_set_default(layout_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    layout = db.session.get(LayoutPosti, layout_id)
+    if not layout:
+        abort(404)
+
+    _imposta_layout_default(layout)
+    db.session.commit()
+    flash(f"'{layout.nome}' impostato come layout di default.", 'success')
+    return redirect(url_for('admin_layout_posti', sala_id=layout.sala_id))
+
+
+@app.route('/admin/layout-posti/delete/<int:layout_id>', methods=['POST'])
+@login_required
+def admin_layout_posti_delete(layout_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    layout = db.session.get(LayoutPosti, layout_id)
+    if not layout:
+        abort(404)
+
+    sala_id = layout.sala_id
+    nome = layout.nome
+
+    eventi_collegati = Evento.query.filter_by(layout_posti_id=layout_id).count()
+    if eventi_collegati > 0:
+        flash(
+            f"Impossibile eliminare '{nome}': è stato usato per creare {eventi_collegati} eventi. "
+            f"Scollega prima quegli eventi se vuoi comunque procedere.",
+            'danger'
+        )
+        return redirect(url_for('admin_layout_posti', sala_id=sala_id))
+
+    try:
+        db.session.delete(layout)
+        db.session.commit()
+        flash(f"Layout '{nome}' eliminato.", 'success')
+    except Exception:
+        db.session.rollback()
+        flash(f"Impossibile eliminare '{nome}': è ancora referenziato altrove.", 'danger')
+
+    return redirect(url_for('admin_layout_posti', sala_id=sala_id))
+
+
+@app.route('/admin/sale')
+@login_required
+def admin_sale():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    sale = Sala.query.order_by(Sala.nome).all()
+    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
+    modifica_id = request.args.get('modifica', type=int)
+    sala_da_modificare = db.session.get(Sala, modifica_id) if modifica_id else None
+
+    return render_template('admin_sale.html', sale=sale, gestori=gestori, sala_da_modificare=sala_da_modificare)
+
+
+@app.route('/admin/sale/add', methods=['POST'])
+@login_required
+def admin_sale_add():
+    if not current_user.is_admin():
+        abort(403)
+
+    nome = request.form.get('nome', '').strip()
+    descrizione = request.form.get('descrizione', '').strip()
+    indirizzo = request.form.get('indirizzo', '').strip()
+    posti_max = request.form.get('posti_max', type=int)
+    overbooking_max = request.form.get('overbooking_max', type=int) or 0
+    email_admin = request.form.get('email_admin', '').strip()
+
+    if not nome or not posti_max:
+        flash('Nome e capienza massima sono campi obbligatori.', 'danger')
+        return redirect(url_for('admin_sale'))
+
+    if posti_max < 1:
+        flash('La capienza massima deve essere almeno 1.', 'danger')
+        return redirect(url_for('admin_sale'))
+
+    if overbooking_max < 0:
+        flash('Il tetto di overbooking non può essere negativo.', 'danger')
+        return redirect(url_for('admin_sale'))
+
+    sala = Sala(
+        nome=nome,
+        descrizione=descrizione or None,
+        indirizzo=indirizzo or None,
+        posti_max=posti_max,
+        overbooking_max=overbooking_max,
+        email_admin=email_admin or None,
+        gestore_default_id=request.form.get('gestore_default_id', type=int) or None,
+    )
+    db.session.add(sala)
+    db.session.commit()
+    flash(f"Sala '{nome}' creata.", 'success')
+    return redirect(url_for('admin_sale'))
+
+
+@app.route('/admin/sale/edit/<int:sala_id>', methods=['POST'])
+@login_required
+def admin_sale_edit(sala_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    sala = db.session.get(Sala, sala_id)
+    if not sala:
+        abort(404)
+
+    nome = request.form.get('nome', '').strip()
+    descrizione = request.form.get('descrizione', '').strip()
+    indirizzo = request.form.get('indirizzo', '').strip()
+    posti_max = request.form.get('posti_max', type=int)
+    overbooking_max = request.form.get('overbooking_max', type=int) or 0
+    email_admin = request.form.get('email_admin', '').strip()
+
+    if not nome or not posti_max:
+        flash('Nome e capienza massima sono campi obbligatori.', 'danger')
+        return redirect(url_for('admin_sale', modifica=sala_id))
+
+    if posti_max < 1:
+        flash('La capienza massima deve essere almeno 1.', 'danger')
+        return redirect(url_for('admin_sale', modifica=sala_id))
+
+    if overbooking_max < 0:
+        flash('Il tetto di overbooking non può essere negativo.', 'danger')
+        return redirect(url_for('admin_sale', modifica=sala_id))
+
+    max_layout_esistente = db.session.query(func.max(LayoutPosti.file * LayoutPosti.colonne)) \
+        .filter(LayoutPosti.sala_id == sala_id).scalar()
+    nuovo_limite = posti_max + overbooking_max
+    if max_layout_esistente and max_layout_esistente > nuovo_limite:
+        flash(
+            f"Attenzione: esiste già un layout per questa sala con {max_layout_esistente} posti, "
+            f"superiore al nuovo limite ({nuovo_limite}). Il layout resta invariato, ma non potrai "
+            f"crearne altri sopra il nuovo limite finché non lo alzi di nuovo.",
+            'warning'
+        )
+
+    sala.nome = nome
+    sala.descrizione = descrizione or None
+    sala.indirizzo = indirizzo or None
+    sala.posti_max = posti_max
+    sala.overbooking_max = overbooking_max
+    sala.email_admin = email_admin or None
+    sala.gestore_default_id = request.form.get('gestore_default_id', type=int) or None
+    db.session.commit()
+    flash(f"Sala '{nome}' aggiornata.", 'success')
+    return redirect(url_for('admin_sale'))
+
+
+@app.route('/admin/sale/delete/<int:sala_id>', methods=['POST'])
+@login_required
+def admin_sale_delete(sala_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    sala = db.session.get(Sala, sala_id)
+    if not sala:
+        abort(404)
+
+    eventi_collegati = Evento.query.filter_by(sala_id=sala_id).count()
+    layout_collegati = LayoutPosti.query.filter_by(sala_id=sala_id).count()
+
+    if eventi_collegati > 0:
+        flash(
+            f"Impossibile eliminare '{sala.nome}': ha {eventi_collegati} eventi collegati. "
+            f"Elimina prima gli eventi se vuoi procedere.",
+            'danger'
+        )
+        return redirect(url_for('admin_sale'))
+
+    if layout_collegati > 0:
+        flash(
+            f"Impossibile eliminare '{sala.nome}': ha {layout_collegati} layout posti collegati. "
+            f"Eliminali prima dalla Gestione Layout Posti.",
+            'danger'
+        )
+        return redirect(url_for('admin_sale'))
+
+    nome = sala.nome
+    db.session.delete(sala)
+    db.session.commit()
+    flash(f"Sala '{nome}' eliminata.", 'success')
+    return redirect(url_for('admin_sale'))
+
+
+@app.route('/guida')
+@login_required
+def guida():
+    return render_template('guida_event_booking.html')
+
+
+# ==============================================================================
+# 9. INTEGRAZIONE GOOGLE CALENDAR (OAUTH & SYNC)
+# ==============================================================================
+
+GOOGLE_SCOPES = [
+    'https://www.googleapis.com/auth/calendar.readonly',
+    'https://www.googleapis.com/auth/calendar.events',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'openid',
+]
+
+FUSO_ORARIO_APP = ZoneInfo('Europe/Rome')
+
+
+def _google_configurato():
+    return bool(app.config.get('GOOGLE_CLIENT_ID') and app.config.get('GOOGLE_CLIENT_SECRET')
+                and app.config.get('GOOGLE_REDIRECT_URI') and app.config.get('TOKEN_ENCRYPTION_KEY'))
+
+
+def _google_client_config():
+    return {
+        "web": {
+            "client_id": app.config['GOOGLE_CLIENT_ID'],
+            "client_secret": app.config['GOOGLE_CLIENT_SECRET'],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [app.config['GOOGLE_REDIRECT_URI']],
+        }
+    }
+
+
+def _fernet():
+    key = app.config.get('TOKEN_ENCRYPTION_KEY')
+    if not key:
+        raise RuntimeError("TOKEN_ENCRYPTION_KEY non configurata.")
+    return Fernet(key.encode() if isinstance(key, str) else key)
+
+
+def _cifra_token(token_plain):
+    return _fernet().encrypt(token_plain.encode()).decode()
+
+
+def _decifra_token(token_cifrato):
+    return _fernet().decrypt(token_cifrato.encode()).decode()
+
+
+def _connessione_google_attiva():
+    return GoogleConnessione.query.order_by(GoogleConnessione.data_connessione.desc()).first()
+
+
+def _credenziali_google(connessione):
+    refresh_token = _decifra_token(connessione.refresh_token_cifrato)
+    return Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=app.config['GOOGLE_CLIENT_ID'],
+        client_secret=app.config['GOOGLE_CLIENT_SECRET'],
+        scopes=GOOGLE_SCOPES,
+    )
+
+
+def _elenca_calendari_google():
+    connessione = _connessione_google_attiva()
+    if not connessione:
+        return None, None
+    try:
+        creds = _credenziali_google(connessione)
+        service = google_build('calendar', 'v3', credentials=creds)
+        risultato = service.calendarList().list(maxResults=250).execute()
+        connessione.ultimo_utilizzo = datetime.utcnow()
+        db.session.commit()
+        return risultato.get('items', []), None
+    except GoogleHttpError as e:
+        return None, f"Errore dall'API Google: {e}"
+    except Exception as e:
+        return None, f"Errore durante il recupero dei calendari: {e}"
+
+
+@app.route('/admin/google')
+@login_required
+def admin_google_status():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    if not _google_configurato():
+        flash(
+            "Google Calendar non è ancora configurato sul server: mancano una o più variabili d'ambiente.",
+            'warning'
+        )
+
+    connessione = _connessione_google_attiva()
+    calendari = None
+    errore_calendari = None
+
+    if connessione and request.args.get('test') == '1':
+        try:
+            creds = _credenziali_google(connessione)
+            service = google_build('calendar', 'v3', credentials=creds)
+            risultato = service.calendarList().list(maxResults=50).execute()
+            calendari = risultato.get('items', [])
+            connessione.ultimo_utilizzo = datetime.utcnow()
+            db.session.commit()
+        except GoogleHttpError as e:
+            errore_calendari = f"Errore dall'API Google: {e}"
+        except Exception as e:
+            errore_calendari = f"Errore durante il test: {e}"
+
+    return render_template(
+        'admin_google.html',
+        connessione=connessione, calendari=calendari, errore_calendari=errore_calendari,
+        google_configurato=_google_configurato()
+    )
+
+
+@app.route('/admin/google/connect')
+@login_required
+def admin_google_connect():
+    if not current_user.is_admin():
+        abort(403)
+    if not _google_configurato():
+        flash('Configurazione Google mancante sul server. Contatta chi gestisce il deploy.', 'danger')
+        return redirect(url_for('admin_google_status'))
+
+    flow = Flow.from_client_config(
+        _google_client_config(), scopes=GOOGLE_SCOPES,
+        redirect_uri=app.config['GOOGLE_REDIRECT_URI']
+    )
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        prompt='consent',
+        include_granted_scopes='true'
+    )
+    session['google_oauth_state'] = state
+    return redirect(authorization_url)
+
+
+@app.route('/admin/google/callback')
+@login_required
+def admin_google_callback():
+    if not current_user.is_admin():
+        abort(403)
+
+    stato_atteso = session.pop('google_oauth_state', None)
+    stato_ricevuto = request.args.get('state')
+    if not stato_atteso or stato_atteso != stato_ricevuto:
+        flash('Sessione OAuth non valida o scaduta. Riprova la connessione.', 'danger')
+        return redirect(url_for('admin_google_status'))
+
+    if request.args.get('error'):
+        flash(f"Autorizzazione negata da Google: {request.args.get('error')}", 'warning')
+        return redirect(url_for('admin_google_status'))
+
+    try:
+        flow = Flow.from_client_config(
+            _google_client_config(), scopes=GOOGLE_SCOPES,
+            redirect_uri=app.config['GOOGLE_REDIRECT_URI']
+        )
+        flow.fetch_token(authorization_response=request.url)
+        creds = flow.credentials
+
+        if not creds.refresh_token:
+            flash(
+                "Google non ha restituito un refresh_token. Prova a scollegare l'account e ripetere la connessione.",
+                'danger'
+            )
+            return redirect(url_for('admin_google_status'))
+
+        userinfo = http_requests.get(
+            'https://www.googleapis.com/oauth2/v2/userinfo',
+            headers={'Authorization': f'Bearer {creds.token}'}, timeout=10
+        ).json()
+        email_google = userinfo.get('email', 'sconosciuta')
+
+        GoogleConnessione.query.delete()
+
+        connessione = GoogleConnessione(
+            utente_id=current_user.id,
+            email_google=email_google,
+            refresh_token_cifrato=_cifra_token(creds.refresh_token),
+            scopes=' '.join(creds.scopes or GOOGLE_SCOPES),
+        )
+        db.session.add(connessione)
+        db.session.commit()
+        flash(f"Account Google collegato con successo: {email_google}", 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Errore durante il collegamento a Google: {str(e)}", 'danger')
+
+    return redirect(url_for('admin_google_status'))
+
+
+@app.route('/admin/google/disconnect', methods=['POST'])
+@login_required
+def admin_google_disconnect():
+    if not current_user.is_admin():
+        abort(403)
+
+    connessione = _connessione_google_attiva()
+    if connessione:
+        try:
+            refresh_token = _decifra_token(connessione.refresh_token_cifrato)
+            http_requests.post(
+                'https://oauth2.googleapis.com/revoke',
+                params={'token': refresh_token},
+                headers={'content-type': 'application/x-www-form-urlencoded'}, timeout=10
+            )
+        except Exception:
+            pass
+
+        db.session.delete(connessione)
+        db.session.commit()
+        flash('Account Google scollegato.', 'success')
+    else:
+        flash('Nessun account Google era collegato.', 'info')
+
+    return redirect(url_for('admin_google_status'))
+
+
+@app.route('/admin/google/sale')
+@login_required
+def admin_google_sale():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    if not _google_configurato():
+        flash('Google Calendar non è ancora configurato sul server.', 'warning')
+        return redirect(url_for('admin_google_status'))
+
+    connessione = _connessione_google_attiva()
+    if not connessione:
+        flash('Collega prima un account Google prima di associare i calendari alle sale.', 'warning')
+        return redirect(url_for('admin_google_status'))
+
+    calendari, errore_calendari = _elenca_calendari_google()
+    sale = Sala.query.order_by(Sala.nome).all()
+    associazioni = {a.sala_id: a for a in CalendarioGoogle.query.all()}
+
+    return render_template(
+        'admin_google_sale.html',
+        sale=sale, associazioni=associazioni,
+        calendari=calendari, errore_calendari=errore_calendari
+    )
+
+
+@app.route('/admin/google/sale/<int:sala_id>/associa', methods=['POST'])
+@login_required
+def admin_google_sale_associa(sala_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    sala = db.session.get(Sala, sala_id)
+    if not sala:
+        abort(404)
+
+    google_calendar_id = (request.form.get('google_calendar_id') or '').strip()
+    if not google_calendar_id:
+        flash('Seleziona un calendario da associare.', 'warning')
+        return redirect(url_for('admin_google_sale'))
+
+    nome_calendario = (request.form.get('nome_calendario') or google_calendar_id).strip()
+
+    associazione = CalendarioGoogle.query.filter_by(sala_id=sala_id).first()
+    if associazione:
+        associazione.google_calendar_id = google_calendar_id
+        associazione.nome_calendario = nome_calendario
+        associazione.attivo = True
+    else:
+        associazione = CalendarioGoogle(
+            sala_id=sala_id,
+            google_calendar_id=google_calendar_id,
+            nome_calendario=nome_calendario,
+            creato_da=current_user.id,
+        )
+        db.session.add(associazione)
+
+    db.session.commit()
+    flash(f'Calendario "{nome_calendario}" associato alla sala "{sala.nome}".', 'success')
+    return redirect(url_for('admin_google_sale'))
+
+
+@app.route('/admin/google/sale/<int:sala_id>/rimuovi', methods=['POST'])
+@login_required
+def admin_google_sale_rimuovi(sala_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    associazione = CalendarioGoogle.query.filter_by(sala_id=sala_id).first()
+    if associazione:
+        db.session.delete(associazione)
+        db.session.commit()
+        flash('Associazione rimossa.', 'success')
+    else:
+        flash('Nessuna associazione da rimuovere per questa sala.', 'info')
+
+    return redirect(url_for('admin_google_sale'))
+
+
+def _parse_datetime_google(valore_iso):
+    return datetime.fromisoformat(valore_iso.replace('Z', '+00:00'))
+
+
+def _layout_default_per_sala(sala_id):
+    layout = LayoutPosti.query.filter_by(sala_id=sala_id, genere_evento_id=None, is_default=True).first()
+    if not layout:
+        layout = LayoutPosti.query.filter_by(sala_id=sala_id, is_default=True).first()
+    return layout
+
+
+def _crea_posti_griglia(evento):
+    numero = 1
+    posti_bulk = []
+    for f in range(1, evento.file + 1):
+        fila_lettera = chr(64 + f)
+        for c in range(1, evento.colonne + 1):
+            posti_bulk.append(Posto(
+                sala_id=evento.sala_id, evento_id=evento.id, numero_posto=numero,
+                fila=fila_lettera, colonna=c, stato='libero'
+            ))
+            numero += 1
+    db.session.add_all(posti_bulk)
+
+
+def _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, google_event_id, gestore_id=None, genere_evento_id_scelto=None):
+    layout = _layout_default_per_sala(sala_id)
+    if not layout:
+        return None, 'nessun layout di default configurato per questa sala'
+
+    sala = db.session.get(Sala, sala_id)
+    posti_max = layout.file * layout.colonne
+    limite = sala.posti_max + (sala.overbooking_max if layout.overbooking_abilitato else 0)
+    if posti_max > limite:
+        return None, f'il layout di default ({posti_max} posti) supera la capacità della sala ({limite})'
+
+    genere_finale = genere_evento_id_scelto if genere_evento_id_scelto is not None else layout.genere_evento_id
+
+    evento = Evento(
+        nome=nome, descrizione=descrizione, data_evento=data_obj, ora_inizio=ora_obj,
+        durata=durata, posti_max=posti_max, file=layout.file, colonne=layout.colonne,
+        corridoio_colonne=layout.corridoio_colonne, corridoio_file=layout.corridoio_file,
+        sala_id=sala_id, creato_da=current_user.id,
+        layout_posti_id=layout.id, genere_evento_id=genere_finale,
+        gestore_id=gestore_id,
+        overbooking_abilitato=layout.overbooking_abilitato,
+        origine='google', google_event_id=google_event_id,
+        google_calendar_id_origine=calendar_id if google_event_id else None,
+        google_updated=datetime.utcnow(),
+    )
+    db.session.add(evento)
+    db.session.flush()
+    _crea_posti_griglia(evento)
+    return evento, None
+
+
+def _recupera_eventi_google_range(service, calendar_id, giorni):
+    ora = datetime.now(FUSO_ORARIO_APP)
+    time_min = ora.isoformat()
+    time_max = (ora + timedelta(days=giorni)).isoformat()
+
+    eventi, page_token = [], None
+    while True:
+        risultato = service.events().list(
+            calendarId=calendar_id, timeMin=time_min, timeMax=time_max,
+            singleEvents=True, orderBy='startTime', maxResults=250, pageToken=page_token
+        ).execute()
+        eventi.extend(risultato.get('items', []))
+        page_token = risultato.get('nextPageToken')
+        if not page_token:
+            break
+    return eventi
+
+
+def _normalizza_evento_google(item):
+    start, end = item.get('start', {}), item.get('end', {})
+    if 'dateTime' not in start or 'dateTime' not in end:
+        return None
+
+    inizio = _parse_datetime_google(start['dateTime']).astimezone(FUSO_ORARIO_APP)
+    fine = _parse_datetime_google(end['dateTime']).astimezone(FUSO_ORARIO_APP)
+    durata_minuti = max(1, round((fine - inizio).total_seconds() / 60))
+
+    return {
+        'google_event_id': item['id'],
+        'nome': item.get('summary') or '(senza titolo)',
+        'descrizione': item.get('description', '') or '',
+        'data_evento': inizio.date(),
+        'ora_inizio': inizio.time().replace(second=0, microsecond=0),
+        'durata': durata_minuti,
+        'link_google': item.get('htmlLink'),
+    }
+
+
+@app.route('/admin/google/import', methods=['GET'])
+@login_required
+def admin_google_import():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    if not _google_configurato():
+        flash('Google Calendar non è ancora configurato sul server.', 'warning')
+        return redirect(url_for('admin_google_status'))
+
+    connessione = _connessione_google_attiva()
+    if not connessione:
+        flash('Collega prima un account Google.', 'warning')
+        return redirect(url_for('admin_google_status'))
+
+    calendari, errore_calendari = _elenca_calendari_google()
+
+    calendar_id = request.args.get('calendar_id', '').strip()
+    try:
+        giorni = int(request.args.get('giorni', 60))
+    except (TypeError, ValueError):
+        giorni = 60
+    giorni = max(1, min(giorni, 365))
+    gestore_id_import = request.args.get('gestore_id', type=int) or None
+
+    sale = Sala.query.order_by(Sala.nome).all()
+    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
+    if gestore_id_import:
+        generi_disponibili = GenereEvento.query.filter_by(gestore_id=gestore_id_import).order_by(GenereEvento.nome).all()
+    else:
+        generi_disponibili = GenereEvento.query.filter_by(gestore_id=None).order_by(GenereEvento.nome).all()
+    righe_nuovi, righe_modificati, righe_invariati = [], [], []
+    righe_non_importabili, righe_cancellati = [], []
+    errore_import = None
+
+    if calendar_id:
+        try:
+            creds = _credenziali_google(connessione)
+            service = google_build('calendar', 'v3', credentials=creds)
+            eventi_google = _recupera_eventi_google_range(service, calendar_id, giorni)
+            connessione.ultimo_utilizzo = datetime.utcnow()
+            db.session.commit()
+
+            associazione = CalendarioGoogle.query.filter_by(google_calendar_id=calendar_id, attivo=True).first()
+            sala_suggerita_id = associazione.sala_id if associazione else None
+
+            id_trovati = set()
+            for item in eventi_google:
+                if item.get('status') == 'cancelled':
+                    continue
+                dati = _normalizza_evento_google(item)
+                if dati is None:
+                    righe_non_importabili.append({
+                        'nome': item.get('summary') or '(senza titolo)',
+                        'motivo': 'Evento "intera giornata" (senza orario): non supportato in questa versione.',
+                        'link_google': item.get('htmlLink'),
+                    })
+                    continue
+
+                id_trovati.add(dati['google_event_id'])
+                matched = Evento.query.filter_by(
+                    google_event_id=dati['google_event_id'], google_calendar_id_origine=calendar_id
+                ).first()
+
+                riga = dict(dati)
+                if matched:
+                    differenze = []
+                    if matched.nome != dati['nome']:
+                        differenze.append(('Nome', matched.nome, dati['nome']))
+                    if matched.data_evento != dati['data_evento']:
+                        differenze.append(('Data', matched.data_evento.strftime('%d/%m/%Y'), dati['data_evento'].strftime('%d/%m/%Y')))
+                    if matched.ora_inizio != dati['ora_inizio']:
+                        differenze.append(('Ora', matched.ora_inizio.strftime('%H:%M'), dati['ora_inizio'].strftime('%H:%M')))
+                    if matched.durata != dati['durata']:
+                        differenze.append(('Durata (min)', matched.durata, dati['durata']))
+
+                    riga['evento_id'] = matched.id
+                    riga['sala_attuale'] = matched.sala.nome
+                    riga['sala_attuale_id'] = matched.sala_id
+                    riga['genere_attuale_id'] = matched.genere_evento_id
+                    riga['ha_prenotazioni'] = len(matched.prenotazioni) > 0
+
+                    (righe_modificati if differenze else righe_invariati).append(riga)
+                    riga['differenze'] = differenze
+                else:
+                    riga['sala_suggerita'] = sala_suggerita_id
+                    righe_nuovi.append(riga)
+
+            oggi = date.today()
+            fine_periodo = oggi + timedelta(days=giorni)
+            candidati_cancellati = Evento.query.filter(
+                Evento.google_calendar_id_origine == calendar_id,
+                Evento.origine == 'google',
+                Evento.cancellato_google == False,
+                Evento.data_evento >= oggi,
+                Evento.data_evento <= fine_periodo,
+            ).all()
+            for ev in candidati_cancellati:
+                if ev.google_event_id not in id_trovati:
+                    righe_cancellati.append({
+                        'evento_id': ev.id, 'nome': ev.nome, 'data_evento': ev.data_evento,
+                        'ora_inizio': ev.ora_inizio, 'sala': ev.sala.nome,
+                        'ha_prenotazioni': len(ev.prenotazioni) > 0,
+                    })
+
+        except GoogleHttpError as e:
+            errore_import = f"Errore dall'API Google: {e}"
+        except Exception as e:
+            errore_import = f"Errore durante il recupero degli eventi: {e}"
+
+    return render_template(
+        'admin_google_import.html',
+        calendari=calendari, errore_calendari=errore_calendari,
+        calendar_id=calendar_id, giorni=giorni, sale=sale,
+        gestori=gestori, gestore_id_import=gestore_id_import, generi_disponibili=generi_disponibili,
+        righe_nuovi=righe_nuovi, righe_modificati=righe_modificati,
+        righe_invariati=righe_invariati, righe_non_importabili=righe_non_importabili,
+        righe_cancellati=righe_cancellati, errore_import=errore_import,
+    )
+
+
+@app.route('/admin/google/import/applica', methods=['POST'])
+@login_required
+def admin_google_import_applica():
+    if not current_user.is_admin():
+        abort(403)
+
+    calendar_id = request.form.get('calendar_id', '').strip()
+    giorni = request.form.get('giorni', type=int) or 60
+    gestore_id_import = request.form.get('gestore_id', type=int) or None
+    gids = request.form.getlist('gid')
+
+    contatori = {'importati': 0, 'aggiornati': 0, 'sostituiti': 0, 'mantenuti_entrambi': 0, 'ignorati': 0, 'errori': 0}
+
+    for gid in gids:
+        azione = request.form.get(f'azione__{gid}', 'ignora')
+        if azione == 'ignora':
+            contatori['ignorati'] += 1
+            continue
+
+        nome = request.form.get(f'nome__{gid}', '').strip()
+        descrizione = request.form.get(f'descrizione__{gid}', '').strip()
+        data_str = request.form.get(f'data__{gid}', '')
+        ora_str = request.form.get(f'ora__{gid}', '')
+        durata = request.form.get(f'durata__{gid}', type=int)
+        sala_id = request.form.get(f'sala__{gid}', type=int)
+        evento_id_esistente = request.form.get(f'evento_id__{gid}', type=int)
+        genere_scelto = request.form.get(f'genere__{gid}', type=int) or None
+
+        try:
+            data_obj = datetime.strptime(data_str, '%Y-%m-%d').date()
+            ora_obj = datetime.strptime(ora_str, '%H:%M').time()
+        except ValueError:
+            contatori['errori'] += 1
+            flash(f'Riga "{nome}": data/ora non valide, saltata.', 'danger')
+            continue
+
+        if not sala_id:
+            contatori['errori'] += 1
+            flash(f'Riga "{nome}": nessuna sala di destinazione selezionata, saltata.', 'danger')
+            continue
+
+        if azione == 'aggiorna':
+            evento = db.session.get(Evento, evento_id_esistente) if evento_id_esistente else None
+            if not evento:
+                contatori['errori'] += 1
+                flash(f'Riga "{nome}": evento da aggiornare non trovato, saltata.', 'danger')
+                continue
+            evento.nome = nome
+            evento.descrizione = descrizione
+            evento.data_evento = data_obj
+            evento.ora_inizio = ora_obj
+            evento.durata = durata
+            evento.sala_id = sala_id
+            evento.gestore_id = gestore_id_import
+            evento.genere_evento_id = genere_scelto
+            evento.google_updated = datetime.utcnow()
+            contatori['aggiornati'] += 1
+
+        elif azione == 'sostituisci':
+            evento_vecchio = db.session.get(Evento, evento_id_esistente) if evento_id_esistente else None
+            if evento_vecchio:
+                db.session.delete(evento_vecchio)
+                db.session.flush()
+            _, errore = _crea_evento_da_import(
+                sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, gid,
+                gestore_id=gestore_id_import, genere_evento_id_scelto=genere_scelto
+            )
+            if errore:
+                contatori['errori'] += 1
+                flash(f'Riga "{nome}": {errore}, impossibile creare l\'evento.', 'danger')
+                continue
+            contatori['sostituiti'] += 1
+
+        elif azione == 'importa_nuovo':
+            _, errore = _crea_evento_da_import(
+                sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, gid,
+                gestore_id=gestore_id_import, genere_evento_id_scelto=genere_scelto
+            )
+            if errore:
+                contatori['errori'] += 1
+                flash(f'Riga "{nome}": {errore}, impossibile creare l\'evento.', 'danger')
+                continue
+            contatori['importati'] += 1
+
+        elif azione == 'mantieni_entrambi':
+            _, errore = _crea_evento_da_import(
+                sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, None,
+                gestore_id=gestore_id_import, genere_evento_id_scelto=genere_scelto
+            )
+            if errore:
+                contatori['errori'] += 1
+                flash(f'Riga "{nome}": {errore}, impossibile creare l\'evento.', 'danger')
+                continue
+            contatori['mantenuti_entrambi'] += 1
+
+    for evento_id_str in request.form.getlist('cancel_evento_id'):
+        evento_id = int(evento_id_str)
+        azione_cancel = request.form.get(f'azione_cancel__{evento_id}', 'ignora')
+        evento = db.session.get(Evento, evento_id)
+        if not evento:
+            continue
+        if azione_cancel == 'annulla':
+            evento.cancellato_google = True
+        elif azione_cancel == 'elimina':
+            db.session.delete(evento)
+
+    db.session.commit()
+
+    riepilogo = (
+        f"Import completato — nuovi: {contatori['importati']}, aggiornati: {contatori['aggiornati']}, "
+        f"sostituiti: {contatori['sostituiti']}, mantenuti entrambi: {contatori['mantenuti_entrambi']}, "
+        f"ignorati: {contatori['ignorati']}" + (f", errori: {contatori['errori']}" if contatori['errori'] else "")
+    )
+    flash(riepilogo, 'success' if not contatori['errori'] else 'warning')
+    return redirect(url_for('admin_google_import', calendar_id=calendar_id, giorni=giorni, gestore_id=gestore_id_import))
+
+
+# ==============================================================================
+# 10. GENERAZIONE DOCUMENTALE PDF (REPORTLAB A3)
+# ==============================================================================
+
+def _parse_corridoi_pdf(valore):
+    if not valore:
+        return []
+    return [int(x.strip()) for x in valore.split(',') if x.strip().isdigit()]
+
+
+def _genera_pdf_evento(evento):
+    posti = (
+        Posto.query.filter_by(evento_id=evento.id)
+        .options(joinedload(Posto.prenotazione).joinedload(Prenotazione.utente))
+        .all()
+    )
+    posti_by_fc = {(p.fila, p.colonna): p for p in posti}
+
+    prenotazioni = (
+        Prenotazione.query.filter_by(evento_id=evento.id)
+        .options(joinedload(Prenotazione.utente), joinedload(Prenotazione.posti))
+        .order_by(Prenotazione.nome_prenotazione)
+        .all()
+    )
+
+    corr_col = _parse_corridoi_pdf(evento.corridoio_colonne)
+    corr_file = _parse_corridoi_pdf(evento.corridoio_file)
+
+    buffer = io.BytesIO()
+    page_size = landscape(A3)
+    width, height = page_size
+    c = pdfcanvas.Canvas(buffer, pagesize=page_size)
+
+    # Pagina 1: mappa posti
+    c.setFont('Helvetica-Bold', 18)
+    c.drawString(15 * mm, height - 15 * mm, evento.nome)
+    c.setFont('Helvetica', 11)
+    intestazione = f"{evento.sala.nome} — {evento.data_evento.strftime('%d/%m/%Y')} {evento.ora_inizio.strftime('%H:%M')}"
+    if evento.gestore:
+        intestazione += f" — {evento.gestore.ragione_sociale}"
+    c.drawString(15 * mm, height - 22 * mm, intestazione)
+    c.setFont('Helvetica', 8)
+    c.drawString(15 * mm, height - 27 * mm, f"Stampato il {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+
+    margine_sx = 15 * mm
+    margine_top = 35 * mm
+    area_larghezza = width - 2 * margine_sx
+    area_altezza = height - margine_top - 15 * mm
+
+    colonne_visive = evento.colonne + len(corr_col)
+    file_visive = evento.file + len(corr_file)
+    cella_w = min(24 * mm, area_larghezza / max(colonne_visive, 1))
+    cella_h = min(16 * mm, area_altezza / max(file_visive, 1))
+
+    y = height - margine_top
+    for f in range(1, evento.file + 1):
+        fila_lettera = chr(64 + f)
+        x = margine_sx
+        for col in range(1, evento.colonne + 1):
+            posto = posti_by_fc.get((fila_lettera, col))
+            occupato = posto and posto.stato != 'libero' and posto.prenotazione_id
+            c.setFillColor(colors.HexColor('#dbeafe') if occupato else colors.white)
+            c.rect(x, y - cella_h, cella_w, cella_h, stroke=1, fill=1)
+            c.setFillColor(colors.black)
+            c.setFont('Helvetica', 8)
+            c.drawString(x + 1.5 * mm, y - 4.5 * mm, f"{fila_lettera}{col}")
+            if occupato:
+                nome = (posto.prenotazione.nome_prenotazione or posto.prenotazione.utente.nome_cognome or '')
+                c.setFont('Helvetica-Bold', 8)
+                c.drawString(x + 1.5 * mm, y - cella_h + 3 * mm, nome[:16])
+            x += cella_w
+            if col in corr_col:
+                x += cella_w * 0.4
+        y -= cella_h
+        if f in corr_file:
+            y -= cella_h * 0.4
+
+    c.showPage()
+
+    # Pagina 2: elenco prenotazioni e foglio presenze
+    c.setFont('Helvetica-Bold', 16)
+    c.drawString(15 * mm, height - 15 * mm, f"Elenco prenotazioni — {evento.nome}")
+    c.setFont('Helvetica', 9)
+    c.drawString(15 * mm, height - 21 * mm, f"{evento.sala.nome} — {evento.data_evento.strftime('%d/%m/%Y')} {evento.ora_inizio.strftime('%H:%M')} — {len(prenotazioni)} prenotazioni")
+
+    riga_h = 8 * mm
+    y = height - 32 * mm
+
+    def intestazione_tabella(y_pos):
+        c.setFont('Helvetica-Bold', 9)
+        c.drawString(15 * mm, y_pos, "Arrivo")
+        c.drawString(30 * mm, y_pos, "Nome")
+        c.drawString(110 * mm, y_pos, "Email / Cellulare")
+        c.drawString(200 * mm, y_pos, "Posti")
+        c.drawString(260 * mm, y_pos, "Check-in app")
+        c.line(15 * mm, y_pos - 2 * mm, width - 15 * mm, y_pos - 2 * mm)
+        return y_pos - riga_h
+
+    y = intestazione_tabella(y)
+    c.setFont('Helvetica', 9)
+    for p in prenotazioni:
+        if y < 20 * mm:
+            c.showPage()
+            y = height - 20 * mm
+            y = intestazione_tabella(y)
+            c.setFont('Helvetica', 9)
+
+        nome_display = p.nome_prenotazione or p.utente.nome_cognome
+        contatto = p.utente.email or p.utente.cellulare or ''
+        posti_str = ', '.join(sorted(f"{s.fila}{s.colonna}" for s in p.posti))
+
+        c.rect(15 * mm, y - 4 * mm, 6 * mm, 6 * mm)
+        c.drawString(30 * mm, y, nome_display[:38])
+        c.drawString(110 * mm, y, contatto[:38])
+        c.drawString(200 * mm, y, posti_str[:35])
+        c.drawString(260 * mm, y, '✓ Presente' if p.presente else '')
+        y -= riga_h
+
+    c.save()
+    buffer.seek(0)
+    return buffer
+
+
+@app.route('/admin/evento/<int:event_id>/stampa-pdf')
+@login_required
+def stampa_evento_pdf(event_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+
+    buffer = _genera_pdf_evento(evento)
+    filename = f"evento_{evento.id}_{evento.data_evento.strftime('%Y%m%d')}.pdf"
+    return Response(
+        buffer.read(), mimetype='application/pdf',
+        headers={'Content-Disposition': f'inline; filename="{filename}"'}
+    )
+
+
+# ==============================================================================
+# 11. MIGRAZIONI E STARTUP HOOKS
+# ==============================================================================
+
+def _run_startup_migrations():
+    try:
+        inspector = inspect(db.engine)
+
+        if 'prenotazione' in inspector.get_table_names():
+            cols = {c['name'] for c in inspector.get_columns('prenotazione')}
+            if 'presente' not in cols:
+                db.session.execute(text(
+                    "ALTER TABLE prenotazione ADD COLUMN presente BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
+                app.logger.info('startup-migration: aggiunta prenotazione.presente')
+            if 'check_in_at' not in cols:
+                db.session.execute(text(
+                    "ALTER TABLE prenotazione ADD COLUMN check_in_at TIMESTAMP"
+                ))
+                app.logger.info('startup-migration: aggiunta prenotazione.check_in_at')
+            if 'check_in_da' not in cols:
+                db.session.execute(text(
+                    "ALTER TABLE prenotazione ADD COLUMN check_in_da INTEGER REFERENCES utente(id)"
+                ))
+                app.logger.info('startup-migration: aggiunta prenotazione.check_in_da')
+
+        db.session.commit()
+        app.logger.info("Migrazioni di avvio completate (o gia' presenti).")
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f'Migrazioni di avvio fallite: {e}')
+
+
+@app.route('/init-db')
+@login_required
+def init_db():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+    db.create_all()
+    return 'Database inizializzato!'
+
+
+@app.route('/admin/migrate-layout-posti')
+@login_required
+def migrate_layout_posti():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    esiti, aggiunte = [], []
+    try:
+        inspector = inspect(db.engine)
+        tables = inspector.get_table_names()
+
+        if 'layout_posti' not in tables or 'genere_evento' not in tables:
+            return (
+                "Le tabelle 'layout_posti' e/o 'genere_evento' non esistono ancora. "
+                "Visita <a href='/init-db'>/init-db</a> prima di eseguire questa migrazione."
+            ), 400
+
+        sala_columns = [col['name'] for col in inspector.get_columns('sala')]
+        if 'overbooking_max' not in sala_columns:
+            db.session.execute(text("ALTER TABLE sala ADD COLUMN overbooking_max INTEGER NOT NULL DEFAULT 0"))
+            aggiunte.append('sala.overbooking_max')
+        else:
+            esiti.append("sala.overbooking_max esiste già")
+
+        evento_columns = [col['name'] for col in inspector.get_columns('evento')]
+        if 'layout_posti_id' not in evento_columns:
+            db.session.execute(text("ALTER TABLE evento ADD COLUMN layout_posti_id INTEGER REFERENCES layout_posti(id)"))
+            aggiunte.append('evento.layout_posti_id')
+        else:
+            esiti.append("evento.layout_posti_id esiste già")
+
+        if 'genere_evento_id' not in evento_columns:
+            db.session.execute(text("ALTER TABLE evento ADD COLUMN genere_evento_id INTEGER REFERENCES genere_evento(id)"))
+            aggiunte.append('evento.genere_evento_id')
+        else:
+            esiti.append("evento.genere_evento_id esiste già")
+
+        if 'overbooking_abilitato' not in evento_columns:
+            db.session.execute(text("ALTER TABLE evento ADD COLUMN overbooking_abilitato BOOLEAN NOT NULL DEFAULT FALSE"))
+            aggiunte.append('evento.overbooking_abilitato')
+        else:
+            esiti.append("evento.overbooking_abilitato esiste già")
+
+        layout_columns = [col['name'] for col in inspector.get_columns('layout_posti')]
+        if 'overbooking_abilitato' not in layout_columns:
+            db.session.execute(text("ALTER TABLE layout_posti ADD COLUMN overbooking_abilitato BOOLEAN NOT NULL DEFAULT FALSE"))
+            aggiunte.append('layout_posti.overbooking_abilitato')
+        else:
+            esiti.append("layout_posti.overbooking_abilitato esiste già")
+
+        if aggiunte:
+            db.session.commit()
+            return (
+                "✅ Migrazione completata!<br>"
+                f"Colonne aggiunte: {', '.join(aggiunte)}<br>"
+                f"{'<br>'.join(esiti)}"
+            )
+        return "ℹ️ Nessuna migrazione necessaria, colonne già presenti.<br>" + '<br>'.join(esiti)
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+@app.route('/admin/migrate-google-import')
+@login_required
+def migrate_google_import():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    esiti, aggiunte = [], []
+    try:
+        inspector = inspect(db.engine)
+        evento_columns = [col['name'] for col in inspector.get_columns('evento')]
+
+        colonne_da_aggiungere = [
+            ('origine', "ALTER TABLE evento ADD COLUMN origine VARCHAR(20) NOT NULL DEFAULT 'app'"),
+            ('google_event_id', "ALTER TABLE evento ADD COLUMN google_event_id VARCHAR(255)"),
+            ('google_calendar_id_origine', "ALTER TABLE evento ADD COLUMN google_calendar_id_origine VARCHAR(255)"),
+            ('google_updated', "ALTER TABLE evento ADD COLUMN google_updated TIMESTAMP"),
+            ('cancellato_google', "ALTER TABLE evento ADD COLUMN cancellato_google BOOLEAN NOT NULL DEFAULT FALSE"),
+        ]
+
+        for nome_colonna, ddl in colonne_da_aggiungere:
+            if nome_colonna not in evento_columns:
+                db.session.execute(text(ddl))
+                aggiunte.append(f'evento.{nome_colonna}')
+            else:
+                esiti.append(f"evento.{nome_colonna} esiste già")
+
+        indici_esistenti = [idx['name'] for idx in inspector.get_indexes('evento')]
+        if 'ix_evento_google_event_id' not in indici_esistenti:
+            db.session.execute(text("CREATE INDEX ix_evento_google_event_id ON evento (google_event_id)"))
+            aggiunte.append('indice ix_evento_google_event_id')
+
+        if aggiunte:
+            db.session.commit()
+            return f"✅ Migrazione completata!<br>Aggiunte: {', '.join(aggiunte)}<br>{'<br>'.join(esiti)}"
+        return "ℹ️ Nessuna migrazione necessaria.<br>" + '<br>'.join(esiti)
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+@app.route('/admin/migrate-generi-gestore')
+@login_required
+def migrate_generi_gestore():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    esiti, aggiunte = [], []
+    try:
+        inspector = inspect(db.engine)
+        colonne_esistenti = [col['name'] for col in inspector.get_columns('genere_evento')]
+
+        colonne_da_aggiungere = [
+            ('gestore_id', "ALTER TABLE genere_evento ADD COLUMN gestore_id INTEGER REFERENCES gestore(id)"),
+            ('descrizione_aggiuntiva', "ALTER TABLE genere_evento ADD COLUMN descrizione_aggiuntiva TEXT"),
+            ('logo', "ALTER TABLE genere_evento ADD COLUMN logo BYTEA"),
+            ('logo_mimetype', "ALTER TABLE genere_evento ADD COLUMN logo_mimetype VARCHAR(50)"),
+        ]
+
+        for nome_colonna, ddl in colonne_da_aggiungere:
+            if nome_colonna not in colonne_esistenti:
+                db.session.execute(text(ddl))
+                aggiunte.append(f'genere_evento.{nome_colonna}')
+            else:
+                esiti.append(f"genere_evento.{nome_colonna} esiste già")
+
+        indici_esistenti = [idx['name'] for idx in inspector.get_indexes('genere_evento')]
+        if 'ix_genere_evento_gestore_id' not in indici_esistenti:
+            db.session.execute(text("CREATE INDEX ix_genere_evento_gestore_id ON genere_evento (gestore_id)"))
+            aggiunte.append('indice ix_genere_evento_gestore_id')
+
+        if aggiunte:
+            db.session.commit()
+            return f"✅ Migrazione completata!<br>Aggiunto: {', '.join(aggiunte)}<br>{'<br>'.join(esiti)}"
+        return "ℹ️ Nessuna migrazione necessaria.<br>" + '<br>'.join(esiti)
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+@app.route('/admin/migrate-prenotazione-checkin')
+@login_required
+def migrate_prenotazione_checkin():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    esiti, aggiunte = [], []
+    try:
+        inspector = inspect(db.engine)
+        colonne_esistenti = [col['name'] for col in inspector.get_columns('prenotazione')]
+
+        colonne_da_aggiungere = [
+            ('presente', "ALTER TABLE prenotazione ADD COLUMN presente BOOLEAN NOT NULL DEFAULT FALSE"),
+            ('check_in_at', "ALTER TABLE prenotazione ADD COLUMN check_in_at TIMESTAMP"),
+            ('check_in_da', "ALTER TABLE prenotazione ADD COLUMN check_in_da INTEGER REFERENCES utente(id)"),
+        ]
+
+        for nome_colonna, ddl in colonne_da_aggiungere:
+            if nome_colonna not in colonne_esistenti:
+                db.session.execute(text(ddl))
+                aggiunte.append(f'prenotazione.{nome_colonna}')
+            else:
+                esiti.append(f"prenotazione.{nome_colonna} esiste già")
+
+        if aggiunte:
+            db.session.commit()
+            return f"✅ Migrazione completata!<br>Aggiunto: {', '.join(aggiunte)}<br>{'<br>'.join(esiti)}"
+        return "ℹ️ Nessuna migrazione necessaria.<br>" + '<br>'.join(esiti)
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+@app.route('/admin/migrate-evento-gestore')
+@login_required
+def migrate_evento_gestore():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    try:
+        inspector = inspect(db.engine)
+        colonne_esistenti = [col['name'] for col in inspector.get_columns('evento')]
+
+        if 'gestore_id' not in colonne_esistenti:
+            db.session.execute(text("ALTER TABLE evento ADD COLUMN gestore_id INTEGER REFERENCES gestore(id)"))
+            indici_esistenti = [idx['name'] for idx in inspector.get_indexes('evento')]
+            if 'ix_evento_gestore_id' not in indici_esistenti:
+                db.session.execute(text("CREATE INDEX ix_evento_gestore_id ON evento (gestore_id)"))
+            db.session.commit()
+            return "✅ Migrazione completata!<br>Aggiunto: evento.gestore_id (+ indice)"
+        return "ℹ️ Nessuna migrazione necessaria, evento.gestore_id esiste già."
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+@app.route('/admin/migrate-sala-gestore')
+@login_required
+def migrate_sala_gestore():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    try:
+        inspector = inspect(db.engine)
+        colonne_esistenti = [col['name'] for col in inspector.get_columns('sala')]
+
+        if 'gestore_default_id' not in colonne_esistenti:
+            db.session.execute(text("ALTER TABLE sala ADD COLUMN gestore_default_id INTEGER REFERENCES gestore(id)"))
+            db.session.commit()
+            return "✅ Migrazione completata!<br>Aggiunto: sala.gestore_default_id"
+        return "ℹ️ Nessuna migrazione necessaria, sala.gestore_default_id esiste già."
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+# Esecuzione automatica creazioni e migrazioni all'avvio del worker
+with app.app_context():
+    db.create_all()
+    _run_startup_migrations()
+
+
+if __name__ == '__main__':
+    app.run()
