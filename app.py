@@ -4,28 +4,46 @@ import io
 import threading
 import socket
 from datetime import datetime, date, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, session, Response
-from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from zoneinfo import ZoneInfo
+
+from flask import (
+    Flask, render_template, request, redirect, url_for,
+    flash, jsonify, abort, session, Response
+)
+from flask_login import (
+    LoginManager, login_user, logout_user,
+    login_required, current_user
+)
 from flask_mail import Mail, Message
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from sqlalchemy import func, or_, text, inspect
 from sqlalchemy.orm import joinedload
 from itsdangerous import URLSafeTimedSerializer
-from models import db, Utente, Sala, Evento, Prenotazione, Posto, GenereEvento, LayoutPosti, GoogleConnessione, CalendarioGoogle, Gestore
-from config import Config
 
-# Fase B - Google Calendar
 import requests as http_requests
 from cryptography.fernet import Fernet, InvalidToken
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build as google_build
+from googleapiclient.errors import HttpError as GoogleHttpError
+
 from reportlab.lib.pagesizes import A3, landscape
 from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas as pdfcanvas
-from googleapiclient.errors import HttpError as GoogleHttpError
+
+from models import (
+    db, Utente, Sala, Evento, Prenotazione, Posto,
+    GenereEvento, LayoutPosti, GoogleConnessione,
+    CalendarioGoogle, Gestore
+)
+from config import Config
+
+
+# ==============================================================================
+# 1. INIZIALIZZAZIONE APPLICAZIONE ED ESTENSIONI
+# ==============================================================================
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -41,20 +59,63 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 db.init_app(app)
 mail = Mail(app)
 
-# ==================== EMAIL FALLBACK (SMTP → Resend API) ====================
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+login_manager.login_message = 'Effettua il login per accedere a questa pagina.'
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(Utente, int(user_id))
+
+
+# ==============================================================================
+# 2. UTILITY DI SICUREZZA E TOKEN
+# ==============================================================================
+
+def get_reset_token(email):
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    return serializer.dumps(email, salt='password-reset-salt')
+
+
+def verify_reset_token(token, max_age=3600):
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    try:
+        return serializer.loads(token, salt='password-reset-salt', max_age=max_age)
+    except Exception:
+        return None
+
+
+# ==============================================================================
+# 3. SISTEMA EMAIL (SMTP -> BREVO -> RESEND FALLBACK + TASK ASINCRONI)
+# ==============================================================================
+
+_email_queue = []  # Queue in memoria per retry
+
+
+class EmailNetworkError(Exception):
+    pass
+
 
 def _extract_email(raw):
-    """Estrae l'indirizzo email da stringhe tipo 'Nome <email@dom.com>'.
-    Restituisce None se il formato non è valido."""
+    """Estrae l'indirizzo email da stringhe tipo 'Nome <email@dom.com>'."""
     if not raw or not isinstance(raw, str):
         return None
     raw = raw.strip()
     m = re.search(r'<([^>]+)>', raw)
     email = m.group(1).strip() if m else raw
-    # Validazione base email
     if '@' not in email or '.' not in email.split('@')[-1]:
         return None
     return email
+
 
 def _is_network_error(e):
     """Riconosce errori di rete comuni su Render free tier."""
@@ -67,13 +128,9 @@ def _is_network_error(e):
     ]
     return any(err in msg for err in network_errors)
 
-class EmailNetworkError(Exception):
-    pass
 
 def _send_via_brevo(msg, api_key):
-    """Invia email tramite l'API HTTP di Brevo. Richiede solo un mittente
-    verificato (no dominio DNS obbligatorio), compatibile con Render free tier."""
-    import requests
+    """Invia email tramite l'API HTTP di Brevo."""
     from_email = app.config.get('BREVO_FROM_EMAIL') or _extract_email(app.config.get('MAIL_DEFAULT_SENDER'))
     if not from_email:
         raise EmailNetworkError('BREVO_FROM_EMAIL non configurato')
@@ -88,7 +145,7 @@ def _send_via_brevo(msg, api_key):
     if msg.html:
         payload["htmlContent"] = msg.html
 
-    resp = requests.post(
+    resp = http_requests.post(
         'https://api.brevo.com/v3/smtp/email',
         headers={
             'api-key': api_key,
@@ -104,9 +161,7 @@ def _send_via_brevo(msg, api_key):
 
 
 def _send_via_resend(msg, api_key):
-    """Invia email tramite l'API HTTP di Resend. Richiede dominio verificato
-    per inviare a destinatari diversi dal proprio account."""
-    import requests
+    """Invia email tramite l'API HTTP di Resend."""
     resend_from = app.config.get('RESEND_FROM_EMAIL')
     if not resend_from:
         extracted = _extract_email(msg.sender or app.config.get('MAIL_DEFAULT_SENDER'))
@@ -124,7 +179,7 @@ def _send_via_resend(msg, api_key):
     if msg.html:
         payload["html"] = msg.html
 
-    resp = requests.post(
+    resp = http_requests.post(
         'https://api.resend.com/emails',
         headers={
             'Authorization': f'Bearer {api_key}',
@@ -139,8 +194,7 @@ def _send_via_resend(msg, api_key):
 
 
 def send_email_message(msg):
-    """Invia email: SMTP -> Brevo (primario per Render free tier) -> Resend (fallback,
-    utile quando avrai un dominio verificato su Resend)."""
+    """Invia email: SMTP -> Brevo (primario per Render) -> Resend (fallback)."""
     old_timeout = socket.getdefaulttimeout()
     socket.setdefaulttimeout(5)
     try:
@@ -175,85 +229,37 @@ def send_email_message(msg):
         raise EmailNetworkError(' | '.join(errors))
 
 
-limiter = Limiter(
-    get_remote_address,
-    app=app,
-    default_limits=["200 per day", "50 per hour"],
-    storage_uri="memory://"
-)
-
-login_manager = LoginManager()
-login_manager.init_app(app)
-login_manager.login_view = 'login'
-login_manager.login_message = 'Effettua il login per accedere a questa pagina.'
-
-@login_manager.user_loader
-def load_user(user_id):
-    return db.session.get(Utente, int(user_id))
-
-# ==================== UTILITIES ====================
-
-def get_reset_token(email):
-    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
-    return serializer.dumps(email, salt='password-reset-salt')
-
-def verify_reset_token(token, max_age=3600):
-    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
-    try:
-        email = serializer.loads(token, salt='password-reset-salt', max_age=max_age)
-        return email
-    except Exception:
-        return None
-
-# ==================== EMAIL WRAPPER (graceful per Render free tier) ====================
-
-_email_queue = []  # Queue in memoria per retry al prossimo avvio
-
-class EmailNetworkError(Exception):
-    pass
-
-def _is_network_error(e):
-    """Riconosce errori di rete comuni su Render free tier."""
-    msg = str(e).lower()
-    network_errors = [
-        'network is unreachable', 'no route to host', 'connection refused',
-        'connection timed out', 'name or service not known', 'temporary failure in name resolution',
-        'errno 101', 'errno 111', 'errno 113', 'errno -2', 'errno -3',
-        'ssl', 'tls', 'authentication', 'smtplib'
-    ]
-    return any(err in msg for err in network_errors)
-
-def _graceful_send_email(app, fn, *args, **kwargs):
-    """Wrapper che cattura errori di rete senza riempire i log di ERROR."""
-    with app.app_context():
+def _graceful_send_email(application, fn, *args, **kwargs):
+    """Wrapper di contesto che cattura gli errori di rete in modo asincrono."""
+    with application.app_context():
         old_timeout = socket.getdefaulttimeout()
         socket.setdefaulttimeout(5)
         try:
             fn(*args, **kwargs)
-            app.logger.info(f'Email inviata correttamente: {fn.__name__}')
+            application.logger.info(f'Email inviata correttamente: {fn.__name__}')
         except Exception as e:
             if _is_network_error(e):
-                app.logger.info(f'Email non inviata (rete non disponibile, tipico Render free tier): {fn.__name__} — {e}')
-                # Salva in queue per possibile retry
+                application.logger.info(f'Email non inviata (rete non disponibile): {fn.__name__} — {e}')
                 _email_queue.append({'fn': fn.__name__, 'args': args, 'kwargs': kwargs, 'error': str(e)})
             else:
-                app.logger.error(f'Errore invio email async: {e}')
+                application.logger.error(f'Errore invio email async: {e}')
         finally:
             socket.setdefaulttimeout(old_timeout)
             db.session.remove()
 
-def run_email_task(app, fn, *args, **kwargs):
-    """Esegue l'invio email in un thread separato con timeout socket ridotto.
-    Render free tier blocca SMTP (porta 587), quindi il thread morira' dopo 5s
-    invece di bloccare il worker Gunicorn per 30s. Gli errori di rete sono
-    catturati gracefulmente e loggati come INFO."""
-    thread = threading.Thread(target=_graceful_send_email, args=(app, fn) + args, kwargs=kwargs, daemon=True)
+
+def run_email_task(application, fn, *args, **kwargs):
+    """Esegue l'invio email in un thread separato daemon."""
+    thread = threading.Thread(
+        target=_graceful_send_email,
+        args=(application, fn) + args,
+        kwargs=kwargs,
+        daemon=True
+    )
     thread.start()
 
-# ==================== EMAIL FUNCTIONS (chiamate solo da thread) ====================
 
 def _send_registration_email(utente_id):
-    """Chiamata solo dal thread di background."""
     with db.session.no_autoflush:
         utente = db.session.get(Utente, utente_id)
         if not utente:
@@ -283,8 +289,8 @@ Grazie per esserti registrato!
         except Exception as e:
             app.logger.error(f'Errore invio email registrazione: {e}')
 
+
 def _send_registration_notify_admin(utente_id):
-    """Chiamata solo dal thread di background."""
     with db.session.no_autoflush:
         utente = db.session.get(Utente, utente_id)
         if not utente:
@@ -311,8 +317,8 @@ L'utente puo' ora effettuare il login e prenotare posti.
         except Exception as e:
             app.logger.error(f'Errore notifica admin: {e}')
 
+
 def _send_confirmation_email(evento_id, utente_id, posti_ids, nome_prenotazione=None):
-    """Chiamata solo dal thread di background."""
     with db.session.no_autoflush:
         evento = db.session.get(Evento, evento_id)
         utente = db.session.get(Utente, utente_id)
@@ -365,8 +371,8 @@ Posti prenotati ({num_posti}): {posti_str}
         except Exception as e:
             app.logger.error(f'Errore email conferma admin: {e}')
 
+
 def _send_cancellation_email(evento_id, utente_id, posti_str, prenotazione_eliminata=False, nome_prenotazione=None):
-    """Chiamata solo dal thread di background."""
     with db.session.no_autoflush:
         evento = db.session.get(Evento, evento_id)
         utente = db.session.get(Utente, utente_id)
@@ -378,11 +384,8 @@ def _send_cancellation_email(evento_id, utente_id, posti_str, prenotazione_elimi
 
         try:
             if prenotazione_eliminata:
-                msg = Message(
-                    subject=f'Prenotazione Annullata - {num_posti} {posti_label} - {evento.nome}',
-                    recipients=[utente.email],
-                    sender='EventBooking <noreply@event_booking.com>',
-                    body=f"""Ciao {display_name},
+                subject = f'Prenotazione Annullata - {num_posti} {posti_label} - {evento.nome}'
+                body = f"""Ciao {display_name},
 
 La tua prenotazione per l'evento "{evento.nome}" e' stata annullata (tutti i posti rimossi).
 
@@ -393,13 +396,9 @@ Posti annullati ({num_posti}): {posti_str}
 
 Se non hai richiesto tu questa operazione, contatta l'amministratore.
 """
-                )
             else:
-                msg = Message(
-                    subject=f'Posti Annullati - {num_posti} {posti_label} - {evento.nome}',
-                    recipients=[utente.email],
-                    sender='EventBooking <noreply@event_booking.com>',
-                    body=f"""Ciao {display_name},
+                subject = f'Posti Annullati - {num_posti} {posti_label} - {evento.nome}'
+                body = f"""Ciao {display_name},
 
 I posti {posti_str} per l'evento "{evento.nome}" sono stati annullati.
 
@@ -410,13 +409,18 @@ Posti annullati ({num_posti}): {posti_str}
 
 Se non hai richiesto tu questa operazione, contatta l'amministratore.
 """
-                )
+            msg = Message(
+                subject=subject,
+                recipients=[utente.email],
+                sender='EventBooking <noreply@event_booking.com>',
+                body=body
+            )
             send_email_message(msg)
         except Exception as e:
             app.logger.error(f'Errore email cancellazione: {e}')
 
+
 def _send_reset_password_email(utente_id, reset_url):
-    """Chiamata solo dal thread di background."""
     with db.session.no_autoflush:
         utente = db.session.get(Utente, utente_id)
         if not utente:
@@ -442,8 +446,8 @@ Se non hai richiesto tu questa operazione, ignora questa email.
         except Exception as e:
             app.logger.error(f'Errore email reset password: {e}')
 
+
 def _send_deletion_emails(email_data_list):
-    """Chiamata solo dal thread di background. Invia tutte le email di cancellazione."""
     for data in email_data_list:
         try:
             msg = Message(
@@ -456,7 +460,10 @@ def _send_deletion_emails(email_data_list):
         except Exception as e:
             app.logger.error(f'Errore email cancellazione posti: {e}')
 
-# ==================== AUTH ====================
+
+# ==============================================================================
+# 4. AUTENTICAZIONE E ACCOUNT UTENTE
+# ==============================================================================
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -492,11 +499,9 @@ def register():
 
         user = Utente(nome_cognome=nome, username=username, email=email, cellulare=cellulare, tipo='user')
         user.set_password(password)
-        print(f"DEBUG: Generated hash for {username}: {user.password_hash[:50]}...")  # Add this
         db.session.add(user)
         db.session.commit()
 
-        # Email in background (non blocca la risposta)
         run_email_task(app, _send_registration_email, user.id)
         run_email_task(app, _send_registration_notify_admin, user.id)
 
@@ -504,39 +509,33 @@ def register():
         return redirect(url_for('login'))
     return render_template('register.html')
 
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         identifier = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
 
-        # DEBUG temporaneo: non logga mai la password, solo diagnostica
         app.logger.info(f'LOGIN DEBUG: identifier={identifier!r} len_password={len(password)}')
 
         if '@' in identifier:
             user = Utente.query.filter_by(email=identifier).first()
-            app.logger.info(f'LOGIN DEBUG: ricerca per email -> trovato={user is not None}')
         else:
             user = Utente.query.filter_by(username=identifier).first()
-            app.logger.info(f'LOGIN DEBUG: ricerca per username -> trovato={user is not None}')
 
-        if user:
-            ok = user.check_password(password)
-            app.logger.info(
-                f'LOGIN DEBUG: user_id={user.id} tipo={user.tipo} '
-                f'check_password={ok} hash_prefix={user.password_hash[:20]!r}'
-            )
-            if ok:
-                login_user(user)
-                return redirect(url_for('calendar_view'))
+        if user and user.check_password(password):
+            login_user(user)
+            return redirect(url_for('calendar_view'))
         flash('Credenziali non valide.', 'danger')
     return render_template('login.html')
+
 
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
     return redirect(url_for('login'))
+
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
@@ -550,12 +549,12 @@ def forgot_password():
         token = get_reset_token(user.email)
         reset_url = url_for('reset_password', token=token, _external=True)
 
-        # Email in background (non blocca la risposta)
         run_email_task(app, _send_reset_password_email, user.id, reset_url)
 
         flash('Email di reset inviata! Controlla la tua casella di posta.', 'success')
         return redirect(url_for('login'))
     return render_template('forgot_password.html')
+
 
 @app.route('/reset-password/<token>', methods=['GET', 'POST'])
 def reset_password(token):
@@ -584,13 +583,17 @@ def reset_password(token):
         return redirect(url_for('login'))
     return render_template('reset_password_form.html', token=token)
 
-# ==================== CALENDARIO ====================
+
+# ==============================================================================
+# 5. CALENDARIO ED EVENTI LATO UTENTE
+# ==============================================================================
 
 @app.route('/')
 @app.route('/calendar')
 @login_required
 def calendar_view():
     return render_template('calendar.html')
+
 
 @app.route('/api/events')
 @login_required
@@ -626,6 +629,7 @@ def api_events():
         })
     return jsonify(result)
 
+
 @app.route('/api/event/<int:event_id>')
 @login_required
 def api_event_detail(event_id):
@@ -646,6 +650,7 @@ def api_event_detail(event_id):
         'file': ev.file,
         'colonne': ev.colonne
     })
+
 
 @app.route('/le-mie-prenotazioni')
 @login_required
@@ -678,7 +683,565 @@ def mie_prenotazioni():
     return render_template('mie_prenotazioni.html', future=future, passate=passate)
 
 
-# ==================== GESTIONE EVENTI (ADMIN) ====================
+# ==============================================================================
+# 6. PRENOTAZIONI, GESTIONE POSTI E CHECK-IN
+# ==============================================================================
+
+@app.route('/booking/<int:event_id>')
+@login_required
+def booking_page(event_id):
+    ev = db.session.get(Evento, event_id)
+    if not ev:
+        abort(404)
+    if ev.data_evento < date.today():
+        flash("Non e' possibile prenotare eventi passati.", 'danger')
+        return redirect(url_for('calendar_view'))
+    if ev.cancellato_google:
+        flash("Questo evento è stato annullato (rimosso dal calendario Google di origine) e non è più prenotabile.", 'danger')
+        return redirect(url_for('calendar_view'))
+    return render_template('booking.html', evento=ev)
+
+
+@app.route('/api/seats/<int:event_id>')
+@login_required
+def api_seats(event_id):
+    evento = db.session.get(Evento, event_id)
+    posti = Posto.query.options(
+        joinedload(Posto.prenotazione).joinedload(Prenotazione.utente)
+    ).filter_by(evento_id=event_id).order_by(Posto.fila, Posto.colonna).all()
+
+    corridoio_colonne = []
+    if evento and evento.corridoio_colonne:
+        try:
+            corridoio_colonne = [int(x.strip()) for x in evento.corridoio_colonne.split(',') if x.strip()]
+        except ValueError:
+            corridoio_colonne = []
+
+    corridoio_file = []
+    if evento and evento.corridoio_file:
+        try:
+            corridoio_file = [int(x.strip()) for x in evento.corridoio_file.split(',') if x.strip()]
+        except ValueError:
+            corridoio_file = []
+
+    result = []
+    for p in posti:
+        item = {
+            'id': p.id,
+            'fila': p.fila,
+            'colonna': p.colonna,
+            'stato': p.stato,
+            'numero_posto': p.numero_posto,
+            'utente_id': None,
+            'corridoio_colonne': corridoio_colonne,
+            'corridoio_file': corridoio_file
+        }
+        if p.prenotazione:
+            item['utente_id'] = p.prenotazione.utente_id
+            item['is_mio'] = (p.prenotazione.utente_id == current_user.id)
+            item['prenotazione_id'] = p.prenotazione.id
+            item['nome_prenotazione'] = p.prenotazione.nome_prenotazione or p.prenotazione.utente.nome_cognome
+            item['utente_nome'] = p.prenotazione.utente.nome_cognome
+            if current_user.is_admin():
+                item['utente'] = p.prenotazione.utente.nome_cognome
+        else:
+            item['is_mio'] = False
+        result.append(item)
+    return jsonify(result)
+
+
+@app.route('/api/book', methods=['POST'])
+@login_required
+@limiter.limit("10 per minute")
+def api_book():
+    data = request.get_json(silent=True) or {}
+    evento_id = data.get('evento_id')
+    posti_ids = data.get('posti_ids', [])
+    nome_prenotazione = data.get('nome_prenotazione', '').strip() or None
+
+    if not evento_id or not posti_ids:
+        return jsonify({'error': 'Dati mancanti'}), 400
+    if not isinstance(posti_ids, list) or len(posti_ids) == 0:
+        return jsonify({'error': 'Seleziona almeno un posto'}), 400
+
+    try:
+        evento = db.session.get(Evento, evento_id)
+        if not evento:
+            return jsonify({'error': 'Evento non trovato'}), 404
+        if evento.data_evento < date.today():
+            return jsonify({'error': 'Evento non prenotabile'}), 400
+
+        posti = Posto.query.filter(
+            Posto.id.in_(posti_ids),
+            Posto.evento_id == evento_id,
+            Posto.stato == 'libero'
+        ).with_for_update().all()
+
+        if len(posti) != len(posti_ids):
+            db.session.rollback()
+            return jsonify({'error': "Alcuni posti non sono piu' disponibili"}), 409
+
+        prenotazione = Prenotazione(
+            evento_id=evento_id,
+            utente_id=current_user.id,
+            nome_prenotazione=nome_prenotazione,
+            stato='confermata'
+        )
+        db.session.add(prenotazione)
+        db.session.flush()
+
+        for p in posti:
+            p.stato = 'prenotato'
+            p.prenotazione_id = prenotazione.id
+
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f'Errore prenotazione: {e}')
+        return jsonify({'error': 'Errore interno durante la prenotazione'}), 500
+
+    run_email_task(
+        app, _send_confirmation_email,
+        evento.id, current_user.id,
+        [p.id for p in posti],
+        nome_prenotazione
+    )
+    return jsonify({'success': True, 'prenotazione_id': prenotazione.id})
+
+
+@app.route('/api/reserve', methods=['POST'])
+@login_required
+@limiter.limit("10 per minute")
+def api_reserve():
+    if not current_user.is_admin():
+        return jsonify({'error': 'Solo gli amministratori possono riservare posti'}), 403
+
+    data = request.get_json(silent=True) or {}
+    evento_id = data.get('evento_id')
+    posti_ids = data.get('posti_ids', [])
+    nome_prenotazione = data.get('nome_prenotazione', '').strip() or 'Riservato Admin'
+
+    if not evento_id or not posti_ids:
+        return jsonify({'error': 'Dati mancanti'}), 400
+
+    try:
+        posti = Posto.query.filter(
+            Posto.id.in_(posti_ids),
+            Posto.evento_id == evento_id,
+            Posto.stato == 'libero'
+        ).with_for_update().all()
+
+        if len(posti) != len(posti_ids):
+            db.session.rollback()
+            return jsonify({'error': "Alcuni posti non sono piu' disponibili"}), 409
+
+        prenotazione = Prenotazione(
+            evento_id=evento_id,
+            utente_id=current_user.id,
+            nome_prenotazione=nome_prenotazione,
+            stato='riservata'
+        )
+        db.session.add(prenotazione)
+        db.session.flush()
+
+        for p in posti:
+            p.stato = 'riservato'
+            p.prenotazione_id = prenotazione.id
+
+        db.session.commit()
+        return jsonify({'success': True, 'posti_riservati': len(posti), 'prenotazione_id': prenotazione.id})
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f'Errore riserva: {e}')
+        return jsonify({'error': 'Errore interno'}), 500
+
+
+@app.route('/api/abbona', methods=['POST'])
+@login_required
+@limiter.limit("10 per minute")
+def api_abbona():
+    if not current_user.is_admin():
+        return jsonify({'error': 'Solo gli amministratori possono abbonare posti'}), 403
+
+    data = request.get_json(silent=True) or {}
+    evento_id = data.get('evento_id')
+    posti_ids = data.get('posti_ids', [])
+    nome_prenotazione = data.get('nome_prenotazione', '').strip() or 'Abbonato'
+
+    if not evento_id or not posti_ids:
+        return jsonify({'error': 'Dati mancanti'}), 400
+
+    try:
+        posti = Posto.query.filter(
+            Posto.id.in_(posti_ids),
+            Posto.evento_id == evento_id,
+            Posto.stato == 'libero'
+        ).all()
+
+        if len(posti) != len(posti_ids):
+            db.session.rollback()
+            return jsonify({'error': "Alcuni posti non sono piu' disponibili"}), 409
+
+        prenotazione = Prenotazione(
+            evento_id=evento_id,
+            utente_id=current_user.id,
+            nome_prenotazione=nome_prenotazione,
+            stato='abbonata'
+        )
+        db.session.add(prenotazione)
+        db.session.flush()
+
+        for p in posti:
+            p.stato = 'abbonato'
+            p.prenotazione_id = prenotazione.id
+
+        db.session.commit()
+        return jsonify({'success': True, 'posti_abbonati': len(posti), 'prenotazione_id': prenotazione.id})
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f'Errore abbonamento: {e}')
+        return jsonify({'error': 'Errore interno'}), 500
+
+
+@app.route('/api/delete-seats', methods=['POST'])
+@login_required
+@limiter.limit("10 per minute")
+def api_delete_seats():
+    data = request.get_json(silent=True) or {}
+    posto_ids = data.get('posto_ids', [])
+
+    if not posto_ids or not isinstance(posto_ids, list) or len(posto_ids) == 0:
+        return jsonify({'error': 'Nessun posto selezionato'}), 400
+
+    try:
+        if current_user.is_admin():
+            posti = Posto.query.filter(
+                Posto.id.in_(posto_ids),
+                Posto.stato.in_(['prenotato', 'riservato', 'abbonato'])
+            ).with_for_update().all()
+        else:
+            posti = Posto.query.filter(
+                Posto.id.in_(posto_ids),
+                Posto.stato == 'prenotato'
+            ).with_for_update().all()
+
+        if len(posti) != len(posto_ids):
+            db.session.rollback()
+            return jsonify({'error': "Alcuni posti non sono piu' disponibili per la cancellazione"}), 409
+
+        prenotazione_ids = list(set([p.prenotazione_id for p in posti if p.prenotazione_id]))
+
+        prenotazioni = Prenotazione.query.options(
+            joinedload(Prenotazione.utente),
+            joinedload(Prenotazione.evento).joinedload(Evento.sala)
+        ).filter(Prenotazione.id.in_(prenotazione_ids)).all()
+
+        prenotazioni_dict = {p.id: p for p in prenotazioni}
+
+        for p in posti:
+            pren = prenotazioni_dict.get(p.prenotazione_id)
+            if not pren:
+                db.session.rollback()
+                return jsonify({'error': 'Prenotazione non trovata per un posto'}), 404
+            if not current_user.is_admin() and pren.utente_id != current_user.id:
+                db.session.rollback()
+                return jsonify({'error': 'Non puoi eliminare posti di un altro utente'}), 403
+
+        prenotazioni_coinvolte = {}
+        for p in posti:
+            pid = p.prenotazione_id
+            if pid not in prenotazioni_coinvolte:
+                prenotazioni_coinvolte[pid] = {
+                    'prenotazione': prenotazioni_dict[pid],
+                    'posti': [],
+                    'evento': prenotazioni_dict[pid].evento
+                }
+            prenotazioni_coinvolte[pid]['posti'].append(p)
+
+        posti_str_parts = []
+        for p in posti:
+            posti_str_parts.append(f"{p.fila}{p.colonna}")
+            p.stato = 'libero'
+            p.prenotazione_id = None
+
+        prenotazioni_da_eliminare = []
+        for pid, info in prenotazioni_coinvolte.items():
+            posti_rimanenti = Posto.query.filter_by(prenotazione_id=pid).count()
+            if posti_rimanenti == 0:
+                prenotazioni_da_eliminare.append(info['prenotazione'])
+
+        for pren in prenotazioni_da_eliminare:
+            db.session.delete(pren)
+
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f'Errore eliminazione posti: {e}')
+        return jsonify({'error': 'Errore interno'}), 500
+
+    operatore = "Amministratore" if current_user.is_admin() else "Utente"
+    operatore_nome = current_user.nome_cognome
+    operatore_email = current_user.email
+
+    email_data_list = []
+    for pid, info in prenotazioni_coinvolte.items():
+        pren = info['prenotazione']
+        evento = info['evento']
+        utente = pren.utente
+        pren_esiste = db.session.get(Prenotazione, pid)
+        prenotazione_eliminata = (pren_esiste is None)
+        nome_pren = pren.nome_prenotazione
+        posti_list = info['posti']
+        posti_str_local = ', '.join([f"{p.fila}{p.colonna}" for p in posti_list])
+        num_posti_local = len(posti_list)
+        label = "posto" if num_posti_local == 1 else "posti"
+
+        if prenotazione_eliminata:
+            subject = f'Prenotazione Annullata - {num_posti_local} {label} - {evento.nome}'
+            body = f"""Ciao {nome_pren or utente.nome_cognome},
+
+La tua prenotazione per l'evento "{evento.nome}" e' stata annullata (tutti i posti rimossi).
+
+Data: {evento.data_evento.strftime('%d/%m/%Y')}
+Ora: {evento.ora_inizio.strftime('%H:%M')}
+Sala: {evento.sala.nome}
+Posti annullati ({num_posti_local}): {posti_str_local}
+
+Operazione effettuata da: {operatore} ({operatore_nome} - {operatore_email})
+
+Se non hai richiesto tu questa operazione, contatta l'amministratore.
+"""
+        else:
+            subject = f'Posti Annullati - {num_posti_local} {label} - {evento.nome}'
+            body = f"""Ciao {nome_pren or utente.nome_cognome},
+
+I posti {posti_str_local} per l'evento "{evento.nome}" sono stati annullati.
+
+Data: {evento.data_evento.strftime('%d/%m/%Y')}
+Ora: {evento.ora_inizio.strftime('%H:%M')}
+Sala: {evento.sala.nome}
+Posti annullati ({num_posti_local}): {posti_str_local}
+
+Operazione effettuata da: {operatore} ({operatore_nome} - {operatore_email})
+
+Se non hai richiesto tu questa operazione, contatta l'amministratore.
+"""
+
+        email_data_list.append({
+            'subject': subject,
+            'recipient': utente.email,
+            'body': body
+        })
+
+        if current_user.is_admin() and evento.sala.email_admin:
+            admin_emails = [e.strip() for e in evento.sala.email_admin.split(',') if e.strip()]
+            for admin_email in admin_emails:
+                email_data_list.append({
+                    'subject': f'Notifica: Posti Annullati da Admin - {evento.nome}',
+                    'recipient': admin_email,
+                    'body': f"""Notifica operazione di cancellazione:
+
+Evento: {evento.nome}
+Data: {evento.data_evento.strftime('%d/%m/%Y')}
+Sala: {evento.sala.nome}
+Posti annullati: {posti_str_local}
+
+Prenotazione di: {utente.nome_cognome} ({utente.email})
+Operazione effettuata da: {operatore_nome} ({operatore_email})
+
+Questa e' una notifica automatica.
+"""
+                })
+
+    run_email_task(app, _send_deletion_emails, email_data_list)
+
+    return jsonify({
+        'success': True,
+        'posti_eliminati': len(posti),
+        'prenotazioni_eliminate': len(prenotazioni_da_eliminare),
+        'posti': posti_str_parts
+    })
+
+
+@app.route('/api/delete-booking', methods=['POST'])
+@login_required
+@limiter.limit("10 per minute")
+def api_delete_booking():
+    data = request.get_json(silent=True) or {}
+    prenotazione_id = data.get('prenotazione_id')
+
+    if not prenotazione_id:
+        return jsonify({'error': 'ID prenotazione mancante'}), 400
+
+    try:
+        prenotazione = db.session.get(Prenotazione, prenotazione_id)
+        if not prenotazione:
+            return jsonify({'error': 'Prenotazione non trovata'}), 404
+
+        if not current_user.is_admin() and prenotazione.utente_id != current_user.id:
+            return jsonify({'error': 'Non puoi eliminare questa prenotazione'}), 403
+
+        evento = prenotazione.evento
+        utente = prenotazione.utente
+        nome_pren = prenotazione.nome_prenotazione
+        posti = Posto.query.filter_by(prenotazione_id=prenotazione_id).with_for_update().all()
+        posti_str = ', '.join([f"{p.fila}{p.colonna}" for p in posti])
+
+        for p in posti:
+            p.stato = 'libero'
+            p.prenotazione_id = None
+
+        db.session.delete(prenotazione)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f'Errore eliminazione: {e}')
+        return jsonify({'error': 'Errore interno'}), 500
+
+    run_email_task(
+        app, _send_cancellation_email,
+        evento.id, utente.id, posti_str,
+        True, nome_pren
+    )
+    return jsonify({'success': True})
+
+
+@app.route('/admin/event/<int:event_id>')
+@login_required
+def admin_event_view(event_id):
+    if not current_user.is_admin():
+        flash('Accesso riservato.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    ev = db.session.get(Evento, event_id)
+    if not ev:
+        abort(404)
+
+    search = request.args.get('search', '').strip()
+    query = Prenotazione.query.filter_by(evento_id=event_id)
+    if search:
+        query = query.join(Utente).filter(
+            or_(
+                Utente.nome_cognome.ilike(f'%{search}%'),
+                Utente.email.ilike(f'%{search}%'),
+                Utente.username.ilike(f'%{search}%'),
+                Prenotazione.nome_prenotazione.ilike(f'%{search}%')
+            )
+        )
+
+    query = query.options(
+        joinedload(Prenotazione.utente),
+        joinedload(Prenotazione.posti)
+    )
+
+    prenotazioni = query.all()
+    return render_template('admin_view.html', evento=ev, prenotazioni=prenotazioni, search=search)
+
+
+@app.route('/api/prenotazione/<int:prenotazione_id>')
+@login_required
+def api_prenotazione_detail(prenotazione_id):
+    if not current_user.is_admin():
+        return jsonify({'error': 'Accesso negato'}), 403
+
+    pren = Prenotazione.query.options(
+        joinedload(Prenotazione.utente),
+        joinedload(Prenotazione.posti)
+    ).get_or_404(prenotazione_id)
+
+    return jsonify({
+        'id': pren.id,
+        'utente': {
+            'nome': pren.utente.nome_cognome,
+            'email': pren.utente.email,
+            'cellulare': pren.utente.cellulare,
+            'username': pren.utente.username
+        },
+        'nome_prenotazione': pren.nome_prenotazione,
+        'data_prenotazione': pren.data_prenotazione.strftime('%Y-%m-%d %H:%M'),
+        'stato': pren.stato,
+        'posti': [{'fila': p.fila, 'colonna': p.colonna, 'id': p.id} for p in pren.posti]
+    })
+
+
+@app.route('/api/prenotazione/<int:prenotazione_id>/presente', methods=['POST'])
+@login_required
+def api_prenotazione_toggle_presente(prenotazione_id):
+    if not current_user.is_admin():
+        return jsonify({'error': 'Accesso negato'}), 403
+
+    pren = db.session.get(Prenotazione, prenotazione_id)
+    if not pren:
+        return jsonify({'error': 'Prenotazione non trovata'}), 404
+
+    pren.presente = not pren.presente
+    if pren.presente:
+        pren.check_in_at = datetime.utcnow()
+        pren.check_in_da = current_user.id
+    else:
+        pren.check_in_at = None
+        pren.check_in_da = None
+    db.session.commit()
+
+    return jsonify({'success': True, 'presente': pren.presente})
+
+
+@app.route('/api/seats/search/<int:event_id>')
+@login_required
+def api_seats_search(event_id):
+    if not current_user.is_admin():
+        return jsonify({'error': 'Accesso negato'}), 403
+
+    search = request.args.get('q', '').strip().lower()
+    if not search:
+        return jsonify({'error': 'Termine di ricerca richiesto'}), 400
+
+    posti = Posto.query.options(
+        joinedload(Posto.prenotazione).joinedload(Prenotazione.utente)
+    ).filter_by(evento_id=event_id).all()
+
+    matched = []
+    for p in posti:
+        if p.prenotazione:
+            utente = p.prenotazione.utente
+            nome_pren = p.prenotazione.nome_prenotazione or ''
+            testo = f"{utente.nome_cognome} {utente.email} {utente.username} {nome_pren} {p.fila}{p.colonna}".lower()
+            if search in testo:
+                matched.append({
+                    'id': p.id,
+                    'fila': p.fila,
+                    'colonna': p.colonna,
+                    'stato': p.stato,
+                    'utente': utente.nome_cognome,
+                    'email': utente.email,
+                    'nome_prenotazione': nome_pren
+                })
+
+    return jsonify({'matched': matched, 'count': len(matched), 'search': search})
+
+
+# ==============================================================================
+# 7. GESTIONE EVENTI E MODIFICA LAYOUT (ADMIN)
+# ==============================================================================
+
+def _ultima_fila_libera(evento):
+    ultima_fila = chr(64 + evento.file)
+    occupati = Posto.query.filter(
+        Posto.evento_id == evento.id,
+        Posto.fila == ultima_fila,
+        Posto.stato != 'libero'
+    ).count()
+    return occupati == 0
+
+
+def _ultima_colonna_libera(evento):
+    occupati = Posto.query.filter(
+        Posto.evento_id == evento.id,
+        Posto.colonna == evento.colonne,
+        Posto.stato != 'libero'
+    ).count()
+    return occupati == 0
+
 
 @app.route('/event/create', methods=['GET', 'POST'])
 @login_required
@@ -714,7 +1277,6 @@ def create_event():
             flash('Sala non trovata.', 'danger')
             return redirect(url_for('create_event'))
 
-        # Se è stato scelto un layout salvato, verifica che appartenga davvero a questa sala
         layout_scelto = None
         if layout_id:
             layout_scelto = db.session.get(LayoutPosti, layout_id)
@@ -771,8 +1333,6 @@ def create_event():
         db.session.add(evento)
         db.session.flush()
 
-        # Se non è stato scelto un layout esistente e l'admin ha indicato un nome,
-        # salva questa griglia come nuovo layout riutilizzabile per questa sala.
         if not layout_id and salva_layout_nome:
             nuovo_layout = LayoutPosti(
                 sala_id=sala_id,
@@ -814,34 +1374,6 @@ def create_event():
         'event_create.html', sale=sale, generi=generi, gestori=gestori, layouts=layouts,
         today=real_today, selected_date=selected_date
     )
-
-
-# ==================== MODIFICA LAYOUT EVENTO ESISTENTE (Fase A - rifinitura) ====================
-#
-# Scope deliberatamente ristretto per sicurezza:
-#   - Aggiunta file/colonne: sempre libera, fino al limite sala (+ overbooking se abilitato)
-#   - Rimozione: SOLO dell'ultima fila o dell'ultima colonna (mai una posizione intermedia),
-#     e solo se completamente libera. Questo evita di dover rinumerare file/colonne successive
-#     e di dover decidere come "spezzare" i corridoi già configurati.
-#   - Corridoi: mai ricalcolati automaticamente, l'admin li modifica sempre manualmente.
-
-def _ultima_fila_libera(evento):
-    ultima_fila = chr(64 + evento.file)
-    occupati = Posto.query.filter(
-        Posto.evento_id == evento.id,
-        Posto.fila == ultima_fila,
-        Posto.stato != 'libero'
-    ).count()
-    return occupati == 0
-
-
-def _ultima_colonna_libera(evento):
-    occupati = Posto.query.filter(
-        Posto.evento_id == evento.id,
-        Posto.colonna == evento.colonne,
-        Posto.stato != 'libero'
-    ).count()
-    return occupati == 0
 
 
 @app.route('/admin/event/<int:event_id>/layout')
@@ -985,8 +1517,6 @@ def admin_evento_rimuovi_file(event_id):
     ultima_fila = chr(64 + evento.file)
 
     try:
-        # Lock delle righe coinvolte per evitare che una prenotazione arrivi
-        # proprio mentre stiamo verificando/eliminando (race condition).
         posti_ultima_fila = Posto.query.filter(
             Posto.evento_id == event_id,
             Posto.fila == ultima_fila
@@ -1076,7 +1606,6 @@ def admin_evento_corridoi(event_id):
     flash('Corridoi aggiornati.', 'success')
     return redirect(url_for('admin_evento_layout', event_id=event_id))
 
-# ==================== ELIMINA EVENTO (ADMIN) ====================
 
 @app.route('/api/event/delete/<int:event_id>', methods=['POST'])
 @login_required
@@ -1111,555 +1640,145 @@ def api_delete_event(event_id):
         app.logger.error(f"Errore eliminazione evento: {e}")
         return jsonify({"error": "Errore interno durante l'eliminazione"}), 500
 
-# ==================== PRENOTAZIONE ====================
 
-@app.route('/booking/<int:event_id>')
-@login_required
-def booking_page(event_id):
-    ev = db.session.get(Evento, event_id)
-    if not ev:
+# ==============================================================================
+# 8. GESTIONE GENERI, GESTORI, SALE E LAYOUT SALVATI (ADMIN)
+# ==============================================================================
+
+LOGO_MAX_BYTES = 2 * 1024 * 1024  # 2 MB
+LOGO_MIMETYPES_AMMESSI = {'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'}
+
+
+def _salva_logo_da_form(oggetto, campo_file='logo', campo_rimuovi='rimuovi_logo'):
+    if request.form.get(campo_rimuovi) == 'on':
+        oggetto.logo = None
+        oggetto.logo_mimetype = None
+        return None
+
+    file = request.files.get(campo_file)
+    if file and file.filename:
+        dati = file.read()
+        if len(dati) > LOGO_MAX_BYTES:
+            return f'Il file "{file.filename}" supera i {LOGO_MAX_BYTES // (1024*1024)} MB consentiti.'
+        mimetype = file.mimetype or ''
+        if mimetype not in LOGO_MIMETYPES_AMMESSI:
+            return f'Formato "{mimetype}" non supportato. Usa PNG, JPG, GIF, WEBP o SVG.'
+        oggetto.logo = dati
+        oggetto.logo_mimetype = mimetype
+    return None
+
+
+@app.route('/gestore/<int:gestore_id>/logo')
+def logo_gestore(gestore_id):
+    gestore = db.session.get(Gestore, gestore_id)
+    if not gestore or not gestore.logo:
         abort(404)
-    if ev.data_evento < date.today():
-        flash("Non e' possibile prenotare eventi passati.", 'danger')
-        return redirect(url_for('calendar_view'))
-    if ev.cancellato_google:
-        flash("Questo evento è stato annullato (rimosso dal calendario Google di origine) e non è più prenotabile.", 'danger')
-        return redirect(url_for('calendar_view'))
-    return render_template('booking.html', evento=ev)
+    return Response(gestore.logo, mimetype=gestore.logo_mimetype or 'application/octet-stream')
 
-@app.route('/api/seats/<int:event_id>')
-@login_required
-def api_seats(event_id):
-    evento = db.session.get(Evento, event_id)
-    posti = Posto.query.options(
-        joinedload(Posto.prenotazione).joinedload(Prenotazione.utente)
-    ).filter_by(evento_id=event_id).order_by(Posto.fila, Posto.colonna).all()
 
-    corridoio_colonne = []
-    if evento and evento.corridoio_colonne:
-        try:
-            corridoio_colonne = [int(x.strip()) for x in evento.corridoio_colonne.split(',') if x.strip()]
-        except ValueError:
-            corridoio_colonne = []
-
-    corridoio_file = []
-    if evento and evento.corridoio_file:
-        try:
-            corridoio_file = [int(x.strip()) for x in evento.corridoio_file.split(',') if x.strip()]
-        except ValueError:
-            corridoio_file = []
-
-    result = []
-    for p in posti:
-        item = {
-            'id': p.id,
-            'fila': p.fila,
-            'colonna': p.colonna,
-            'stato': p.stato,
-            'numero_posto': p.numero_posto,
-            'utente_id': None,
-            'corridoio_colonne': corridoio_colonne,
-            'corridoio_file': corridoio_file
-        }
-        if p.prenotazione:
-            item['utente_id'] = p.prenotazione.utente_id
-            item['is_mio'] = (p.prenotazione.utente_id == current_user.id)
-            item['prenotazione_id'] = p.prenotazione.id
-            item['nome_prenotazione'] = p.prenotazione.nome_prenotazione or p.prenotazione.utente.nome_cognome
-            item['utente_nome'] = p.prenotazione.utente.nome_cognome
-            if current_user.is_admin():
-                item['utente'] = p.prenotazione.utente.nome_cognome
-        else:
-            item['is_mio'] = False
-        result.append(item)
-    return jsonify(result)
-
-@app.route('/api/book', methods=['POST'])
-@login_required
-@limiter.limit("10 per minute")
-def api_book():
-    data = request.get_json(silent=True) or {}
-    app.logger.warning(f'DEBUG BOOK — Content-Type: {request.content_type!r} | Body: {request.get_data(as_text=True)[:500]!r} | data parsato: {data!r}')
-    evento_id = data.get('evento_id')
-    posti_ids = data.get('posti_ids', [])
-    nome_prenotazione = data.get('nome_prenotazione', '').strip() or None
-
-    if not evento_id or not posti_ids:
-        return jsonify({'error': 'Dati mancanti'}), 400
-    if not isinstance(posti_ids, list) or len(posti_ids) == 0:
-        return jsonify({'error': 'Seleziona almeno un posto'}), 400
-
-    try:
-        evento = db.session.get(Evento, evento_id)
-        if not evento:
-            return jsonify({'error': 'Evento non trovato'}), 404
-        if evento.data_evento < date.today():
-            return jsonify({'error': 'Evento non prenotabile'}), 400
-
-        posti = Posto.query.filter(
-            Posto.id.in_(posti_ids),
-            Posto.evento_id == evento_id,
-            Posto.stato == 'libero'
-        ).with_for_update().all()
-
-        if len(posti) != len(posti_ids):
-            db.session.rollback()
-            return jsonify({'error': "Alcuni posti non sono piu' disponibili"}), 409
-
-        prenotazione = Prenotazione(
-            evento_id=evento_id,
-            utente_id=current_user.id,
-            nome_prenotazione=nome_prenotazione,
-            stato='confermata'
-        )
-        db.session.add(prenotazione)
-        db.session.flush()
-
-        for p in posti:
-            p.stato = 'prenotato'
-            p.prenotazione_id = prenotazione.id
-
-        db.session.commit()
-
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f'Errore prenotazione: {e}')
-        return jsonify({'error': 'Errore interno durante la prenotazione'}), 500
-
-    # Email in background (non blocca la risposta HTTP)
-    run_email_task(
-        app, _send_confirmation_email,
-        evento.id, current_user.id,
-        [p.id for p in posti],
-        nome_prenotazione
-    )
-    return jsonify({'success': True, 'prenotazione_id': prenotazione.id})
-
-# ==================== RISERVA POSTI (ADMIN) ====================
-
-@app.route('/api/reserve', methods=['POST'])
-@login_required
-@limiter.limit("10 per minute")
-def api_reserve():
-    if not current_user.is_admin():
-        return jsonify({'error': 'Solo gli amministratori possono riservare posti'}), 403
-
-    data = request.get_json(silent=True) or {}
-    evento_id = data.get('evento_id')
-    posti_ids = data.get('posti_ids', [])
-    nome_prenotazione = data.get('nome_prenotazione', '').strip() or 'Riservato Admin'
-
-    if not evento_id or not posti_ids:
-        return jsonify({'error': 'Dati mancanti'}), 400
-
-    try:
-        posti = Posto.query.filter(
-            Posto.id.in_(posti_ids),
-            Posto.evento_id == evento_id,
-            Posto.stato == 'libero'
-        ).with_for_update().all()
-
-        if len(posti) != len(posti_ids):
-            db.session.rollback()
-            return jsonify({'error': "Alcuni posti non sono piu' disponibili"}), 409
-
-        prenotazione = Prenotazione(
-            evento_id=evento_id,
-            utente_id=current_user.id,
-            nome_prenotazione=nome_prenotazione,
-            stato='riservata'
-        )
-        db.session.add(prenotazione)
-        db.session.flush()
-
-        for p in posti:
-            p.stato = 'riservato'
-            p.prenotazione_id = prenotazione.id
-
-        db.session.commit()
-        return jsonify({'success': True, 'posti_riservati': len(posti), 'prenotazione_id': prenotazione.id})
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f'Errore riserva: {e}')
-        return jsonify({'error': 'Errore interno'}), 500
-
-
-# ==================== ABBONA POSTI (ADMIN) ====================
-
-@app.route('/api/abbona', methods=['POST'])
-@login_required
-@limiter.limit("10 per minute")
-def api_abbona():
-    if not current_user.is_admin():
-        return jsonify({'error': 'Solo gli amministratori possono abbonare posti'}), 403
-
-    data = request.get_json(silent=True) or {}
-    evento_id = data.get('evento_id')
-    posti_ids = data.get('posti_ids', [])
-    nome_prenotazione = data.get('nome_prenotazione', '').strip() or 'Abbonato'
-
-    if not evento_id or not posti_ids:
-        return jsonify({'error': 'Dati mancanti'}), 400
-
-    try:
-        posti = Posto.query.filter(
-            Posto.id.in_(posti_ids),
-            Posto.evento_id == evento_id,
-            Posto.stato == 'libero'
-        ).all()
-
-        if len(posti) != len(posti_ids):
-            db.session.rollback()
-            return jsonify({'error': "Alcuni posti non sono piu' disponibili"}), 409
-
-        prenotazione = Prenotazione(
-            evento_id=evento_id,
-            utente_id=current_user.id,
-            nome_prenotazione=nome_prenotazione,
-            stato='abbonata'
-        )
-        db.session.add(prenotazione)
-        db.session.flush()
-
-        for p in posti:
-            p.stato = 'abbonato'
-            p.prenotazione_id = prenotazione.id
-
-        db.session.commit()
-        return jsonify({'success': True, 'posti_abbonati': len(posti), 'prenotazione_id': prenotazione.id})
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f'Errore abbonamento: {e}')
-        return jsonify({'error': 'Errore interno'}), 500
-
-# ==================== ELIMINA SINGOLI POSTI ====================
-
-@app.route('/api/delete-seats', methods=['POST'])
-@login_required
-@limiter.limit("10 per minute")
-def api_delete_seats():
-    data = request.get_json(silent=True) or {}
-    posto_ids = data.get('posto_ids', [])
-
-    if not posto_ids or not isinstance(posto_ids, list) or len(posto_ids) == 0:
-        return jsonify({'error': 'Nessun posto selezionato'}), 400
-
-    try:
-        if current_user.is_admin():
-            posti = Posto.query.filter(
-                Posto.id.in_(posto_ids),
-                Posto.stato.in_(['prenotato', 'riservato', 'abbonato'])
-            ).with_for_update().all()
-        else:
-            posti = Posto.query.filter(
-                Posto.id.in_(posto_ids),
-                Posto.stato == 'prenotato'
-            ).with_for_update().all()
-
-        if len(posti) != len(posto_ids):
-            db.session.rollback()
-            return jsonify({'error': "Alcuni posti non sono piu' disponibili per la cancellazione"}), 409
-
-        prenotazione_ids = list(set([p.prenotazione_id for p in posti if p.prenotazione_id]))
-
-        prenotazioni = Prenotazione.query.options(
-            joinedload(Prenotazione.utente),
-            joinedload(Prenotazione.evento).joinedload(Evento.sala)
-        ).filter(Prenotazione.id.in_(prenotazione_ids)).all()
-
-        prenotazioni_dict = {p.id: p for p in prenotazioni}
-
-        for p in posti:
-            pren = prenotazioni_dict.get(p.prenotazione_id)
-            if not pren:
-                db.session.rollback()
-                return jsonify({'error': 'Prenotazione non trovata per un posto'}), 404
-            if not current_user.is_admin() and pren.utente_id != current_user.id:
-                db.session.rollback()
-                return jsonify({'error': 'Non puoi eliminare posti di un altro utente'}), 403
-
-        prenotazioni_coinvolte = {}
-        for p in posti:
-            pid = p.prenotazione_id
-            if pid not in prenotazioni_coinvolte:
-                prenotazioni_coinvolte[pid] = {
-                    'prenotazione': prenotazioni_dict[pid],
-                    'posti': [],
-                    'evento': prenotazioni_dict[pid].evento
-                }
-            prenotazioni_coinvolte[pid]['posti'].append(p)
-
-        posti_str_parts = []
-        for p in posti:
-            posti_str_parts.append(f"{p.fila}{p.colonna}")
-            p.stato = 'libero'
-            p.prenotazione_id = None
-
-        prenotazioni_da_eliminare = []
-        for pid, info in prenotazioni_coinvolte.items():
-            posti_rimanenti = Posto.query.filter_by(prenotazione_id=pid).count()
-            if posti_rimanenti == 0:
-                prenotazioni_da_eliminare.append(info['prenotazione'])
-
-        for pren in prenotazioni_da_eliminare:
-            db.session.delete(pren)
-
-        db.session.commit()
-
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f'Errore eliminazione posti: {e}')
-        return jsonify({'error': 'Errore interno'}), 500
-
-    # Prepara i dati per le email (tutto primitivo, nessun oggetto ORM)
-    operatore = "Amministratore" if current_user.is_admin() else "Utente"
-    operatore_nome = current_user.nome_cognome
-    operatore_email = current_user.email
-
-    email_data_list = []
-    for pid, info in prenotazioni_coinvolte.items():
-        pren = info['prenotazione']
-        evento = info['evento']
-        utente = pren.utente
-        pren_esiste = db.session.get(Prenotazione, pid)
-        prenotazione_eliminata = (pren_esiste is None)
-        nome_pren = pren.nome_prenotazione
-        posti_list = info['posti']
-        posti_str_local = ', '.join([f"{p.fila}{p.colonna}" for p in posti_list])
-        num_posti_local = len(posti_list)
-        label = "posto" if num_posti_local == 1 else "posti"
-
-        if prenotazione_eliminata:
-            subject = f'Prenotazione Annullata - {num_posti_local} {label} - {evento.nome}'
-            body = f"""Ciao {nome_pren or utente.nome_cognome},
-
-La tua prenotazione per l'evento "{evento.nome}" e' stata annullata (tutti i posti rimossi).
-
-Data: {evento.data_evento.strftime('%d/%m/%Y')}
-Ora: {evento.ora_inizio.strftime('%H:%M')}
-Sala: {evento.sala.nome}
-Posti annullati ({num_posti_local}): {posti_str_local}
-
-Operazione effettuata da: {operatore} ({operatore_nome} - {operatore_email})
-
-Se non hai richiesto tu questa operazione, contatta l'amministratore.
-"""
-        else:
-            subject = f'Posti Annullati - {num_posti_local} {label} - {evento.nome}'
-            body = f"""Ciao {nome_pren or utente.nome_cognome},
-
-I posti {posti_str_local} per l'evento "{evento.nome}" sono stati annullati.
-
-Data: {evento.data_evento.strftime('%d/%m/%Y')}
-Ora: {evento.ora_inizio.strftime('%H:%M')}
-Sala: {evento.sala.nome}
-Posti annullati ({num_posti_local}): {posti_str_local}
-
-Operazione effettuata da: {operatore} ({operatore_nome} - {operatore_email})
-
-Se non hai richiesto tu questa operazione, contatta l'amministratore.
-"""
-
-        email_data_list.append({
-            'subject': subject,
-            'recipient': utente.email,
-            'body': body
-        })
-
-        if current_user.is_admin() and evento.sala.email_admin:
-            admin_emails = [e.strip() for e in evento.sala.email_admin.split(',') if e.strip()]
-            for admin_email in admin_emails:
-                email_data_list.append({
-                    'subject': f'Notifica: Posti Annullati da Admin - {evento.nome}',
-                    'recipient': admin_email,
-                    'body': f"""Notifica operazione di cancellazione:
-
-Evento: {evento.nome}
-Data: {evento.data_evento.strftime('%d/%m/%Y')}
-Sala: {evento.sala.nome}
-Posti annullati: {posti_str_local}
-
-Prenotazione di: {utente.nome_cognome} ({utente.email})
-Operazione effettuata da: {operatore_nome} ({operatore_email})
-
-Questa e' una notifica automatica.
-"""
-                })
-
-    # Invia email in background (non blocca la risposta HTTP)
-    run_email_task(app, _send_deletion_emails, email_data_list)
-
-    return jsonify({
-        'success': True,
-        'posti_eliminati': len(posti),
-        'prenotazioni_eliminate': len(prenotazioni_da_eliminare),
-        'posti': posti_str_parts
-    })
-
-# ==================== ELIMINA PRENOTAZIONE INTERA ====================
-
-@app.route('/api/delete-booking', methods=['POST'])
-@login_required
-@limiter.limit("10 per minute")
-def api_delete_booking():
-    data = request.get_json(silent=True) or {}
-    prenotazione_id = data.get('prenotazione_id')
-
-    if not prenotazione_id:
-        return jsonify({'error': 'ID prenotazione mancante'}), 400
-
-    try:
-        prenotazione = db.session.get(Prenotazione, prenotazione_id)
-        if not prenotazione:
-            return jsonify({'error': 'Prenotazione non trovata'}), 404
-
-        if not current_user.is_admin() and prenotazione.utente_id != current_user.id:
-            return jsonify({'error': 'Non puoi eliminare questa prenotazione'}), 403
-
-        evento = prenotazione.evento
-        utente = prenotazione.utente
-        nome_pren = prenotazione.nome_prenotazione
-        posti = Posto.query.filter_by(prenotazione_id=prenotazione_id).with_for_update().all()
-        posti_str = ', '.join([f"{p.fila}{p.colonna}" for p in posti])
-
-        for p in posti:
-            p.stato = 'libero'
-            p.prenotazione_id = None
-
-        db.session.delete(prenotazione)
-        db.session.commit()
-
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f'Errore eliminazione: {e}')
-        return jsonify({'error': 'Errore interno'}), 500
-
-    # Email in background (non blocca la risposta HTTP)
-    run_email_task(
-        app, _send_cancellation_email,
-        evento.id, utente.id, posti_str,
-        True, nome_pren
-    )
-    return jsonify({'success': True})
-
-# ==================== ADMIN VIEW ====================
-
-@app.route('/admin/event/<int:event_id>')
-@login_required
-def admin_event_view(event_id):
-    if not current_user.is_admin():
-        flash('Accesso riservato.', 'danger')
-        return redirect(url_for('calendar_view'))
-
-    ev = db.session.get(Evento, event_id)
-    if not ev:
+@app.route('/genere/<int:genere_id>/logo')
+def logo_genere(genere_id):
+    genere = db.session.get(GenereEvento, genere_id)
+    if not genere or not genere.logo:
         abort(404)
+    return Response(genere.logo, mimetype=genere.logo_mimetype or 'application/octet-stream')
 
-    search = request.args.get('search', '').strip()
 
-    query = Prenotazione.query.filter_by(evento_id=event_id)
-    if search:
-        query = query.join(Utente).filter(
-            or_(
-                Utente.nome_cognome.ilike(f'%{search}%'),
-                Utente.email.ilike(f'%{search}%'),
-                Utente.username.ilike(f'%{search}%'),
-                Prenotazione.nome_prenotazione.ilike(f'%{search}%')
-            )
-        )
+@app.route('/admin/gestori')
+@login_required
+def admin_gestori():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
 
-    query = query.options(
-        joinedload(Prenotazione.utente),
-        joinedload(Prenotazione.posti)
+    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
+    modifica_id = request.args.get('modifica', type=int)
+    gestore_da_modificare = db.session.get(Gestore, modifica_id) if modifica_id else None
+
+    return render_template('admin_gestori.html', gestori=gestori, gestore_da_modificare=gestore_da_modificare)
+
+
+@app.route('/admin/gestori/add', methods=['POST'])
+@login_required
+def admin_gestori_add():
+    if not current_user.is_admin():
+        abort(403)
+
+    ragione_sociale = (request.form.get('ragione_sociale') or '').strip()
+    if not ragione_sociale:
+        flash('La ragione sociale è obbligatoria.', 'danger')
+        return redirect(url_for('admin_gestori'))
+
+    gestore = Gestore(
+        ragione_sociale=ragione_sociale,
+        indirizzo=(request.form.get('indirizzo') or '').strip() or None,
+        cf_piva=(request.form.get('cf_piva') or '').strip() or None,
+        cellulare=(request.form.get('cellulare') or '').strip() or None,
+        email=(request.form.get('email') or '').strip() or None,
+        pec=(request.form.get('pec') or '').strip() or None,
+        certificazioni=(request.form.get('certificazioni') or '').strip() or None,
+        creato_da=current_user.id,
     )
 
-    prenotazioni = query.all()
-    return render_template('admin_view.html', evento=ev, prenotazioni=prenotazioni, search=search)
+    errore = _salva_logo_da_form(gestore)
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_gestori'))
 
-@app.route('/api/prenotazione/<int:prenotazione_id>')
-@login_required
-def api_prenotazione_detail(prenotazione_id):
-    if not current_user.is_admin():
-        return jsonify({'error': 'Accesso negato'}), 403
-
-    pren = Prenotazione.query.options(
-        joinedload(Prenotazione.utente),
-        joinedload(Prenotazione.posti)
-    ).get_or_404(prenotazione_id)
-
-    return jsonify({
-        'id': pren.id,
-        'utente': {
-            'nome': pren.utente.nome_cognome,
-            'email': pren.utente.email,
-            'cellulare': pren.utente.cellulare,
-            'username': pren.utente.username
-        },
-        'nome_prenotazione': pren.nome_prenotazione,
-        'data_prenotazione': pren.data_prenotazione.strftime('%Y-%m-%d %H:%M'),
-        'stato': pren.stato,
-        'posti': [{'fila': p.fila, 'colonna': p.colonna, 'id': p.id} for p in pren.posti]
-    })
-
-
-@app.route('/api/prenotazione/<int:prenotazione_id>/presente', methods=['POST'])
-@login_required
-def api_prenotazione_toggle_presente(prenotazione_id):
-    if not current_user.is_admin():
-        return jsonify({'error': 'Accesso negato'}), 403
-
-    pren = db.session.get(Prenotazione, prenotazione_id)
-    if not pren:
-        return jsonify({'error': 'Prenotazione non trovata'}), 404
-
-    pren.presente = not pren.presente
-    if pren.presente:
-        pren.check_in_at = datetime.utcnow()
-        pren.check_in_da = current_user.id
-    else:
-        pren.check_in_at = None
-        pren.check_in_da = None
+    db.session.add(gestore)
     db.session.commit()
+    flash(f'Gestore "{gestore.ragione_sociale}" creato.', 'success')
+    return redirect(url_for('admin_gestori'))
 
-    return jsonify({'success': True, 'presente': pren.presente})
 
-
-# ==================== RICERCA POSTI (ADMIN) ====================
-
-@app.route('/api/seats/search/<int:event_id>')
+@app.route('/admin/gestori/<int:gestore_id>/edit', methods=['POST'])
 @login_required
-def api_seats_search(event_id):
+def admin_gestori_edit(gestore_id):
     if not current_user.is_admin():
-        return jsonify({'error': 'Accesso negato'}), 403
+        abort(403)
 
-    search = request.args.get('q', '').strip().lower()
-    if not search:
-        return jsonify({'error': 'Termine di ricerca richiesto'}), 400
+    gestore = db.session.get(Gestore, gestore_id)
+    if not gestore:
+        abort(404)
 
-    posti = Posto.query.options(
-        joinedload(Posto.prenotazione).joinedload(Prenotazione.utente)
-    ).filter_by(evento_id=event_id).all()
+    ragione_sociale = (request.form.get('ragione_sociale') or '').strip()
+    if not ragione_sociale:
+        flash('La ragione sociale è obbligatoria.', 'danger')
+        return redirect(url_for('admin_gestori', modifica=gestore_id))
 
-    matched = []
-    for p in posti:
-        if p.prenotazione:
-            utente = p.prenotazione.utente
-            nome_pren = p.prenotazione.nome_prenotazione or ''
-            testo = f"{utente.nome_cognome} {utente.email} {utente.username} {nome_pren} {p.fila}{p.colonna}".lower()
-            if search in testo:
-                matched.append({
-                    'id': p.id,
-                    'fila': p.fila,
-                    'colonna': p.colonna,
-                    'stato': p.stato,
-                    'utente': utente.nome_cognome,
-                    'email': utente.email,
-                    'nome_prenotazione': nome_pren
-                })
+    gestore.ragione_sociale = ragione_sociale
+    gestore.indirizzo = (request.form.get('indirizzo') or '').strip() or None
+    gestore.cf_piva = (request.form.get('cf_piva') or '').strip() or None
+    gestore.cellulare = (request.form.get('cellulare') or '').strip() or None
+    gestore.email = (request.form.get('email') or '').strip() or None
+    gestore.pec = (request.form.get('pec') or '').strip() or None
+    gestore.certificazioni = (request.form.get('certificazioni') or '').strip() or None
 
-    return jsonify({'matched': matched, 'count': len(matched), 'search': search})
+    errore = _salva_logo_da_form(gestore)
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_gestori', modifica=gestore_id))
 
-# ==================== GESTIONE GENERI EVENTO (Fase A) ====================
+    db.session.commit()
+    flash(f'Gestore "{gestore.ragione_sociale}" aggiornato.', 'success')
+    return redirect(url_for('admin_gestori'))
+
+
+@app.route('/admin/gestori/<int:gestore_id>/delete', methods=['POST'])
+@login_required
+def admin_gestori_delete(gestore_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    gestore = db.session.get(Gestore, gestore_id)
+    if not gestore:
+        abort(404)
+
+    db.session.delete(gestore)
+    db.session.commit()
+    flash('Gestore eliminato.', 'success')
+    return redirect(url_for('admin_gestori'))
+
 
 @app.route('/admin/generi')
 @login_required
@@ -1794,7 +1913,16 @@ def admin_generi_delete(genere_id):
     return redirect(url_for('admin_generi'))
 
 
-# ==================== GESTIONE LAYOUT POSTI (Fase A) ====================
+def _imposta_layout_default(layout):
+    altri = LayoutPosti.query.filter(
+        LayoutPosti.sala_id == layout.sala_id,
+        LayoutPosti.genere_evento_id == layout.genere_evento_id,
+        LayoutPosti.id != layout.id
+    ).all()
+    for altro in altri:
+        altro.is_default = False
+    layout.is_default = True
+
 
 @app.route('/admin/layout-posti')
 @login_required
@@ -1943,165 +2071,6 @@ def admin_layout_posti_delete(layout_id):
     return redirect(url_for('admin_layout_posti', sala_id=sala_id))
 
 
-def _imposta_layout_default(layout):
-    """Resetta il flag is_default sugli altri layout della stessa sala+genere, e lo imposta su questo."""
-    altri = LayoutPosti.query.filter(
-        LayoutPosti.sala_id == layout.sala_id,
-        LayoutPosti.genere_evento_id == layout.genere_evento_id,
-        LayoutPosti.id != layout.id
-    ).all()
-    for altro in altri:
-        altro.is_default = False
-    layout.is_default = True
-
-
-# ==================== FASE C - STEP 1: GESTIONE GESTORI (ANAGRAFICA + LOGO) ====================
-#
-# Anagrafica dell'organizzatore/gestore di eventi. Il logo viene salvato come
-# blob nel database (non su filesystem, che su Render è effimero) e servito
-# tramite una route dedicata. Nessun collegamento ancora a Sala/GenereEvento
-# in questo step (arriva negli step successivi della Fase C).
-
-LOGO_MAX_BYTES = 2 * 1024 * 1024  # 2 MB
-LOGO_MIMETYPES_AMMESSI = {'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'}
-
-
-def _salva_logo_da_form(oggetto, campo_file='logo', campo_rimuovi='rimuovi_logo'):
-    """Applica l'eventuale upload/rimozione del logo su un oggetto che ha i
-    campi .logo e .logo_mimetype (Gestore, e in futuro GenereEvento). Ritorna
-    un messaggio di errore (str) oppure None se tutto ok."""
-    if request.form.get(campo_rimuovi) == 'on':
-        oggetto.logo = None
-        oggetto.logo_mimetype = None
-        return None
-
-    file = request.files.get(campo_file)
-    if file and file.filename:
-        dati = file.read()
-        if len(dati) > LOGO_MAX_BYTES:
-            return f'Il file "{file.filename}" supera i {LOGO_MAX_BYTES // (1024*1024)} MB consentiti.'
-        mimetype = file.mimetype or ''
-        if mimetype not in LOGO_MIMETYPES_AMMESSI:
-            return f'Formato "{mimetype}" non supportato. Usa PNG, JPG, GIF, WEBP o SVG.'
-        oggetto.logo = dati
-        oggetto.logo_mimetype = mimetype
-    return None
-
-
-@app.route('/gestore/<int:gestore_id>/logo')
-def logo_gestore(gestore_id):
-    gestore = db.session.get(Gestore, gestore_id)
-    if not gestore or not gestore.logo:
-        abort(404)
-    return Response(gestore.logo, mimetype=gestore.logo_mimetype or 'application/octet-stream')
-
-
-@app.route('/genere/<int:genere_id>/logo')
-def logo_genere(genere_id):
-    genere = db.session.get(GenereEvento, genere_id)
-    if not genere or not genere.logo:
-        abort(404)
-    return Response(genere.logo, mimetype=genere.logo_mimetype or 'application/octet-stream')
-
-
-@app.route('/admin/gestori')
-@login_required
-def admin_gestori():
-    if not current_user.is_admin():
-        flash('Accesso riservato agli amministratori.', 'danger')
-        return redirect(url_for('calendar_view'))
-
-    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
-    modifica_id = request.args.get('modifica', type=int)
-    gestore_da_modificare = db.session.get(Gestore, modifica_id) if modifica_id else None
-
-    return render_template('admin_gestori.html', gestori=gestori, gestore_da_modificare=gestore_da_modificare)
-
-
-@app.route('/admin/gestori/add', methods=['POST'])
-@login_required
-def admin_gestori_add():
-    if not current_user.is_admin():
-        abort(403)
-
-    ragione_sociale = (request.form.get('ragione_sociale') or '').strip()
-    if not ragione_sociale:
-        flash('La ragione sociale è obbligatoria.', 'danger')
-        return redirect(url_for('admin_gestori'))
-
-    gestore = Gestore(
-        ragione_sociale=ragione_sociale,
-        indirizzo=(request.form.get('indirizzo') or '').strip() or None,
-        cf_piva=(request.form.get('cf_piva') or '').strip() or None,
-        cellulare=(request.form.get('cellulare') or '').strip() or None,
-        email=(request.form.get('email') or '').strip() or None,
-        pec=(request.form.get('pec') or '').strip() or None,
-        certificazioni=(request.form.get('certificazioni') or '').strip() or None,
-        creato_da=current_user.id,
-    )
-
-    errore = _salva_logo_da_form(gestore)
-    if errore:
-        flash(errore, 'danger')
-        return redirect(url_for('admin_gestori'))
-
-    db.session.add(gestore)
-    db.session.commit()
-    flash(f'Gestore "{gestore.ragione_sociale}" creato.', 'success')
-    return redirect(url_for('admin_gestori'))
-
-
-@app.route('/admin/gestori/<int:gestore_id>/edit', methods=['POST'])
-@login_required
-def admin_gestori_edit(gestore_id):
-    if not current_user.is_admin():
-        abort(403)
-
-    gestore = db.session.get(Gestore, gestore_id)
-    if not gestore:
-        abort(404)
-
-    ragione_sociale = (request.form.get('ragione_sociale') or '').strip()
-    if not ragione_sociale:
-        flash('La ragione sociale è obbligatoria.', 'danger')
-        return redirect(url_for('admin_gestori', modifica=gestore_id))
-
-    gestore.ragione_sociale = ragione_sociale
-    gestore.indirizzo = (request.form.get('indirizzo') or '').strip() or None
-    gestore.cf_piva = (request.form.get('cf_piva') or '').strip() or None
-    gestore.cellulare = (request.form.get('cellulare') or '').strip() or None
-    gestore.email = (request.form.get('email') or '').strip() or None
-    gestore.pec = (request.form.get('pec') or '').strip() or None
-    gestore.certificazioni = (request.form.get('certificazioni') or '').strip() or None
-
-    errore = _salva_logo_da_form(gestore)
-    if errore:
-        flash(errore, 'danger')
-        return redirect(url_for('admin_gestori', modifica=gestore_id))
-
-    db.session.commit()
-    flash(f'Gestore "{gestore.ragione_sociale}" aggiornato.', 'success')
-    return redirect(url_for('admin_gestori'))
-
-
-@app.route('/admin/gestori/<int:gestore_id>/delete', methods=['POST'])
-@login_required
-def admin_gestori_delete(gestore_id):
-    if not current_user.is_admin():
-        abort(403)
-
-    gestore = db.session.get(Gestore, gestore_id)
-    if not gestore:
-        abort(404)
-
-    db.session.delete(gestore)
-    db.session.commit()
-    flash('Gestore eliminato.', 'success')
-    return redirect(url_for('admin_gestori'))
-
-
-# ==================== GESTIONE SALE ====================
-
 @app.route('/admin/sale')
 @login_required
 def admin_sale():
@@ -2186,8 +2155,6 @@ def admin_sale_edit(sala_id):
         flash('Il tetto di overbooking non può essere negativo.', 'danger')
         return redirect(url_for('admin_sale', modifica=sala_id))
 
-    # Se riduci posti_max/overbooking_max sotto la capienza di layout/eventi già configurati,
-    # non blocchiamo qui (i layout/eventi esistenti restano come sono), ma avvisiamo l'admin.
     max_layout_esistente = db.session.query(func.max(LayoutPosti.file * LayoutPosti.colonne)) \
         .filter(LayoutPosti.sala_id == sala_id).scalar()
     nuovo_limite = posti_max + overbooking_max
@@ -2226,9 +2193,8 @@ def admin_sale_delete(sala_id):
 
     if eventi_collegati > 0:
         flash(
-            f"Impossibile eliminare '{sala.nome}': ha {eventi_collegati} eventi collegati "
-            f"(eliminandola verrebbero eliminati anche quelli e le relative prenotazioni). "
-            f"Elimina prima gli eventi se vuoi comunque procedere.",
+            f"Impossibile eliminare '{sala.nome}': ha {eventi_collegati} eventi collegati. "
+            f"Elimina prima gli eventi se vuoi procedere.",
             'danger'
         )
         return redirect(url_for('admin_sale'))
@@ -2248,358 +2214,15 @@ def admin_sale_delete(sala_id):
     return redirect(url_for('admin_sale'))
 
 
-# ==================== GUIDA ====================
-
 @app.route('/guida')
 @login_required
 def guida():
     return render_template('guida_event_booking.html')
 
-# ==================== MIGRAZIONI AUTOMATICHE ALL'AVVIO ====================
-# Eseguite una volta all'avvio del worker (idempotenti: verificano se la
-# colonna esiste prima di aggiungerla). Usano solo inspector + SQL DDL, NON
-# richiedono i mapper ORM, quindi funzionano anche quando il login sarebbe
-# rotto (chicken-and-egg delle migrazioni via route admin). Gli errori vengono
-# loggati senza bloccare l'avvio dell'applicazione.
 
-def _run_startup_migrations():
-    try:
-        inspector = inspect(db.engine)
-
-        # Fase D - Step 1: colonne di check-in su 'prenotazione'
-        if 'prenotazione' in inspector.get_table_names():
-            cols = {c['name'] for c in inspector.get_columns('prenotazione')}
-            if 'presente' not in cols:
-                db.session.execute(text(
-                    "ALTER TABLE prenotazione ADD COLUMN presente BOOLEAN NOT NULL DEFAULT FALSE"
-                ))
-                app.logger.info('startup-migration: aggiunta prenotazione.presente')
-            if 'check_in_at' not in cols:
-                db.session.execute(text(
-                    "ALTER TABLE prenotazione ADD COLUMN check_in_at TIMESTAMP"
-                ))
-                app.logger.info('startup-migration: aggiunta prenotazione.check_in_at')
-            if 'check_in_da' not in cols:
-                db.session.execute(text(
-                    "ALTER TABLE prenotazione ADD COLUMN check_in_da INTEGER REFERENCES utente(id)"
-                ))
-                app.logger.info('startup-migration: aggiunta prenotazione.check_in_da')
-
-        db.session.commit()
-        app.logger.info("Migrazioni di avvio completate (o gia' presenti).")
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f'Migrazioni di avvio fallite: {e}')
-
-
-# ==================== INIT DB ====================
-
-
-@app.route('/init-db')
-@login_required
-def init_db():
-    if not current_user.is_admin():
-        abort(403)
-    secret = app.config.get('MIGRATION_SECRET')
-    if not secret or request.args.get('key') != secret:
-        abort(403)
-    db.create_all()
-    return 'Database inizializzato!'
-
-# ==================== MIGRAZIONE LAYOUT POSTI (Fase A) ====================
-
-@app.route('/admin/migrate-layout-posti')
-@login_required
-def migrate_layout_posti():
-    if not current_user.is_admin():
-        abort(403)
-    secret = app.config.get('MIGRATION_SECRET')
-    if not secret or request.args.get('key') != secret:
-        abort(403)
-
-    esiti = []
-    aggiunte = []
-
-    try:
-        inspector = inspect(db.engine)
-        tables = inspector.get_table_names()
-
-        if 'layout_posti' not in tables or 'genere_evento' not in tables:
-            return (
-                "Le tabelle 'layout_posti' e/o 'genere_evento' non esistono ancora. "
-                "Visita <a href='/init-db'>/init-db</a> prima di eseguire questa migrazione."
-            ), 400
-
-        # === SALA ===
-        sala_columns = [col['name'] for col in inspector.get_columns('sala')]
-        if 'overbooking_max' not in sala_columns:
-            db.session.execute(text(
-                "ALTER TABLE sala ADD COLUMN overbooking_max INTEGER NOT NULL DEFAULT 0"
-            ))
-            aggiunte.append('sala.overbooking_max')
-        else:
-            esiti.append("sala.overbooking_max esiste già")
-
-        # === EVENTO ===
-        evento_columns = [col['name'] for col in inspector.get_columns('evento')]
-
-        if 'layout_posti_id' not in evento_columns:
-            db.session.execute(text(
-                "ALTER TABLE evento ADD COLUMN layout_posti_id INTEGER REFERENCES layout_posti(id)"
-            ))
-            aggiunte.append('evento.layout_posti_id')
-        else:
-            esiti.append("evento.layout_posti_id esiste già")
-
-        if 'genere_evento_id' not in evento_columns:
-            db.session.execute(text(
-                "ALTER TABLE evento ADD COLUMN genere_evento_id INTEGER REFERENCES genere_evento(id)"
-            ))
-            aggiunte.append('evento.genere_evento_id')
-        else:
-            esiti.append("evento.genere_evento_id esiste già")
-
-        if 'overbooking_abilitato' not in evento_columns:
-            db.session.execute(text(
-                "ALTER TABLE evento ADD COLUMN overbooking_abilitato BOOLEAN NOT NULL DEFAULT FALSE"
-            ))
-            aggiunte.append('evento.overbooking_abilitato')
-        else:
-            esiti.append("evento.overbooking_abilitato esiste già")
-
-        # === LAYOUT_POSTI (colonna aggiunta al modello dopo la prima creazione tabella) ===
-        layout_columns = [col['name'] for col in inspector.get_columns('layout_posti')]
-
-        if 'overbooking_abilitato' not in layout_columns:
-            db.session.execute(text(
-                "ALTER TABLE layout_posti ADD COLUMN overbooking_abilitato BOOLEAN NOT NULL DEFAULT FALSE"
-            ))
-            aggiunte.append('layout_posti.overbooking_abilitato')
-        else:
-            esiti.append("layout_posti.overbooking_abilitato esiste già")
-
-        if aggiunte:
-            db.session.commit()
-            return (
-                "✅ Migrazione completata!<br>"
-                f"Colonne aggiunte: {', '.join(aggiunte)}<br>"
-                f"{'<br>'.join(esiti)}"
-            )
-        else:
-            return "ℹ️ Nessuna migrazione necessaria, colonne già presenti.<br>" + '<br>'.join(esiti)
-
-    except Exception as e:
-        db.session.rollback()
-        return f"❌ Errore durante la migrazione: {str(e)}", 500
-
-
-# ==================== MIGRAZIONE IMPORT GOOGLE (Fase B, Step 3) ====================
-# Aggiunge le colonne di tracciabilità import su 'evento' (tabella già esistente:
-# db.create_all() non le crea da sola). Stessa protezione di /admin/migrate-layout-posti.
-
-@app.route('/admin/migrate-google-import')
-@login_required
-def migrate_google_import():
-    if not current_user.is_admin():
-        abort(403)
-    secret = app.config.get('MIGRATION_SECRET')
-    if not secret or request.args.get('key') != secret:
-        abort(403)
-
-    esiti, aggiunte = [], []
-
-    try:
-        inspector = inspect(db.engine)
-        evento_columns = [col['name'] for col in inspector.get_columns('evento')]
-
-        colonne_da_aggiungere = [
-            ('origine', "ALTER TABLE evento ADD COLUMN origine VARCHAR(20) NOT NULL DEFAULT 'app'"),
-            ('google_event_id', "ALTER TABLE evento ADD COLUMN google_event_id VARCHAR(255)"),
-            ('google_calendar_id_origine', "ALTER TABLE evento ADD COLUMN google_calendar_id_origine VARCHAR(255)"),
-            ('google_updated', "ALTER TABLE evento ADD COLUMN google_updated TIMESTAMP"),
-            ('cancellato_google', "ALTER TABLE evento ADD COLUMN cancellato_google BOOLEAN NOT NULL DEFAULT FALSE"),
-        ]
-
-        for nome_colonna, ddl in colonne_da_aggiungere:
-            if nome_colonna not in evento_columns:
-                db.session.execute(text(ddl))
-                aggiunte.append(f'evento.{nome_colonna}')
-            else:
-                esiti.append(f"evento.{nome_colonna} esiste già")
-
-        # Indice su google_event_id (usato per il matching negli import successivi)
-        indici_esistenti = [idx['name'] for idx in inspector.get_indexes('evento')]
-        if 'ix_evento_google_event_id' not in indici_esistenti:
-            db.session.execute(text(
-                "CREATE INDEX ix_evento_google_event_id ON evento (google_event_id)"
-            ))
-    except Exception as e:
-        db.session.rollback()
-        return f"❌ Errore durante la migrazione: {str(e)}", 500
-
-
-# ==================== MIGRAZIONE GENERI EVENTO / GESTORE (Fase C, Step 2) ====================
-# Aggiunge le colonne di collegamento a Gestore + logo su 'genere_evento'
-# (tabella già esistente e popolata dalla Fase A: db.create_all() non basta).
-
-@app.route('/admin/migrate-generi-gestore')
-@login_required
-def migrate_generi_gestore():
-    if not current_user.is_admin():
-        abort(403)
-    secret = app.config.get('MIGRATION_SECRET')
-    if not secret or request.args.get('key') != secret:
-        abort(403)
-
-    esiti, aggiunte = [], []
-
-    try:
-        inspector = inspect(db.engine)
-        colonne_esistenti = [col['name'] for col in inspector.get_columns('genere_evento')]
-
-        colonne_da_aggiungere = [
-            ('gestore_id', "ALTER TABLE genere_evento ADD COLUMN gestore_id INTEGER REFERENCES gestore(id)"),
-            ('descrizione_aggiuntiva', "ALTER TABLE genere_evento ADD COLUMN descrizione_aggiuntiva TEXT"),
-            ('logo', "ALTER TABLE genere_evento ADD COLUMN logo BYTEA"),
-            ('logo_mimetype', "ALTER TABLE genere_evento ADD COLUMN logo_mimetype VARCHAR(50)"),
-        ]
-
-        for nome_colonna, ddl in colonne_da_aggiungere:
-            if nome_colonna not in colonne_esistenti:
-                db.session.execute(text(ddl))
-                aggiunte.append(f'genere_evento.{nome_colonna}')
-            else:
-                esiti.append(f"genere_evento.{nome_colonna} esiste già")
-
-        indici_esistenti = [idx['name'] for idx in inspector.get_indexes('genere_evento')]
-        if 'ix_genere_evento_gestore_id' not in indici_esistenti:
-            db.session.execute(text(
-                "CREATE INDEX ix_genere_evento_gestore_id ON genere_evento (gestore_id)"
-            ))
-            aggiunte.append('indice ix_genere_evento_gestore_id')
-        else:
-            esiti.append("indice ix_genere_evento_gestore_id esiste già")
-
-        if aggiunte:
-            db.session.commit()
-            return (
-                "✅ Migrazione completata!<br>"
-                f"Aggiunto: {', '.join(aggiunte)}<br>"
-                f"{'<br>'.join(esiti)}"
-            )
-        else:
-            return "ℹ️ Nessuna migrazione necessaria, colonne/indice già presenti.<br>" + '<br>'.join(esiti)
-
-    except Exception as e:
-        db.session.rollback()
-        return f"❌ Errore durante la migrazione: {str(e)}", 500
-
-
-# ==================== MIGRAZIONE CHECK-IN PRENOTAZIONI (Fase D, Step 1) ====================
-# Aggiunge le colonne di check-in su 'prenotazione' (tabella già esistente e popolata).
-
-@app.route('/admin/migrate-prenotazione-checkin')
-@login_required
-def migrate_prenotazione_checkin():
-    if not current_user.is_admin():
-        abort(403)
-    secret = app.config.get('MIGRATION_SECRET')
-    if not secret or request.args.get('key') != secret:
-        abort(403)
-
-    esiti, aggiunte = [], []
-
-    try:
-        inspector = inspect(db.engine)
-        colonne_esistenti = [col['name'] for col in inspector.get_columns('prenotazione')]
-
-        colonne_da_aggiungere = [
-            ('presente', "ALTER TABLE prenotazione ADD COLUMN presente BOOLEAN NOT NULL DEFAULT FALSE"),
-            ('check_in_at', "ALTER TABLE prenotazione ADD COLUMN check_in_at TIMESTAMP"),
-            ('check_in_da', "ALTER TABLE prenotazione ADD COLUMN check_in_da INTEGER REFERENCES utente(id)"),
-        ]
-
-        for nome_colonna, ddl in colonne_da_aggiungere:
-            if nome_colonna not in colonne_esistenti:
-                db.session.execute(text(ddl))
-                aggiunte.append(f'prenotazione.{nome_colonna}')
-            else:
-                esiti.append(f"prenotazione.{nome_colonna} esiste già")
-
-        if aggiunte:
-            db.session.commit()
-            return "✅ Migrazione completata!<br>Aggiunto: " + ', '.join(aggiunte) + "<br>" + '<br>'.join(esiti)
-        else:
-            return "ℹ️ Nessuna migrazione necessaria, colonne già presenti.<br>" + '<br>'.join(esiti)
-
-    except Exception as e:
-        db.session.rollback()
-        return f"❌ Errore durante la migrazione: {str(e)}", 500
-# Aggiunge la colonna gestore_id su 'evento' (tabella già esistente e popolata).
-
-@app.route('/admin/migrate-evento-gestore')
-@login_required
-def migrate_evento_gestore():
-    if not current_user.is_admin():
-        abort(403)
-    secret = app.config.get('MIGRATION_SECRET')
-    if not secret or request.args.get('key') != secret:
-        abort(403)
-
-    try:
-        inspector = inspect(db.engine)
-        colonne_esistenti = [col['name'] for col in inspector.get_columns('evento')]
-
-        if 'gestore_id' not in colonne_esistenti:
-            db.session.execute(text(
-                "ALTER TABLE evento ADD COLUMN gestore_id INTEGER REFERENCES gestore(id)"
-            ))
-            indici_esistenti = [idx['name'] for idx in inspector.get_indexes('evento')]
-            if 'ix_evento_gestore_id' not in indici_esistenti:
-                db.session.execute(text("CREATE INDEX ix_evento_gestore_id ON evento (gestore_id)"))
-            db.session.commit()
-            return "✅ Migrazione completata!<br>Aggiunto: evento.gestore_id (+ indice)"
-        else:
-            return "ℹ️ Nessuna migrazione necessaria, evento.gestore_id esiste già."
-
-    except Exception as e:
-        db.session.rollback()
-        return f"❌ Errore durante la migrazione: {str(e)}", 500
-# Aggiunge la colonna gestore_default_id su 'sala' (tabella già esistente e
-# popolata dalla Fase A: db.create_all() non basta).
-
-@app.route('/admin/migrate-sala-gestore')
-@login_required
-def migrate_sala_gestore():
-    if not current_user.is_admin():
-        abort(403)
-    secret = app.config.get('MIGRATION_SECRET')
-    if not secret or request.args.get('key') != secret:
-        abort(403)
-
-    try:
-        inspector = inspect(db.engine)
-        colonne_esistenti = [col['name'] for col in inspector.get_columns('sala')]
-
-        if 'gestore_default_id' not in colonne_esistenti:
-            db.session.execute(text(
-                "ALTER TABLE sala ADD COLUMN gestore_default_id INTEGER REFERENCES gestore(id)"
-            ))
-            db.session.commit()
-            return "✅ Migrazione completata!<br>Aggiunto: sala.gestore_default_id"
-        else:
-            return "ℹ️ Nessuna migrazione necessaria, sala.gestore_default_id esiste già."
-
-    except Exception as e:
-        db.session.rollback()
-        return f"❌ Errore durante la migrazione: {str(e)}", 500
-
-
-# ==================== FASE B - GOOGLE CALENDAR: CONNESSIONE OAUTH ====================
-#
-# Scope di questo step: SOLO la connessione OAuth (collega/scollega l'account,
-# verifica che funzioni elencando i calendari disponibili). Nessuna associazione
-# sala<->calendario ancora (arriva nello Step 2), nessun import/export (Step 3/4).
+# ==============================================================================
+# 9. INTEGRAZIONE GOOGLE CALENDAR (OAUTH & SYNC)
+# ==============================================================================
 
 GOOGLE_SCOPES = [
     'https://www.googleapis.com/auth/calendar.readonly',
@@ -2607,6 +2230,8 @@ GOOGLE_SCOPES = [
     'https://www.googleapis.com/auth/userinfo.email',
     'openid',
 ]
+
+FUSO_ORARIO_APP = ZoneInfo('Europe/Rome')
 
 
 def _google_configurato():
@@ -2642,13 +2267,10 @@ def _decifra_token(token_cifrato):
 
 
 def _connessione_google_attiva():
-    """Restituisce l'unica riga di connessione attiva (la più recente), o None."""
     return GoogleConnessione.query.order_by(GoogleConnessione.data_connessione.desc()).first()
 
 
 def _credenziali_google(connessione):
-    """Costruisce un oggetto Credentials di google-auth a partire dalla connessione salvata,
-    decifrando il refresh_token. La libreria lo userà per ottenere un access_token fresco."""
     refresh_token = _decifra_token(connessione.refresh_token_cifrato)
     return Credentials(
         token=None,
@@ -2660,6 +2282,23 @@ def _credenziali_google(connessione):
     )
 
 
+def _elenca_calendari_google():
+    connessione = _connessione_google_attiva()
+    if not connessione:
+        return None, None
+    try:
+        creds = _credenziali_google(connessione)
+        service = google_build('calendar', 'v3', credentials=creds)
+        risultato = service.calendarList().list(maxResults=250).execute()
+        connessione.ultimo_utilizzo = datetime.utcnow()
+        db.session.commit()
+        return risultato.get('items', []), None
+    except GoogleHttpError as e:
+        return None, f"Errore dall'API Google: {e}"
+    except Exception as e:
+        return None, f"Errore durante il recupero dei calendari: {e}"
+
+
 @app.route('/admin/google')
 @login_required
 def admin_google_status():
@@ -2669,8 +2308,7 @@ def admin_google_status():
 
     if not _google_configurato():
         flash(
-            "Google Calendar non è ancora configurato sul server: mancano una o più variabili "
-            "d'ambiente (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, TOKEN_ENCRYPTION_KEY).",
+            "Google Calendar non è ancora configurato sul server: mancano una o più variabili d'ambiente.",
             'warning'
         )
 
@@ -2712,8 +2350,8 @@ def admin_google_connect():
         redirect_uri=app.config['GOOGLE_REDIRECT_URI']
     )
     authorization_url, state = flow.authorization_url(
-        access_type='offline',      # necessario per ottenere un refresh_token
-        prompt='consent',           # forza il consenso ogni volta, garantendo il refresh_token anche su ri-connessioni
+        access_type='offline',
+        prompt='consent',
         include_granted_scopes='true'
     )
     session['google_oauth_state'] = state
@@ -2746,19 +2384,17 @@ def admin_google_callback():
 
         if not creds.refresh_token:
             flash(
-                "Google non ha restituito un refresh_token. Prova a scollegare l'account da "
-                "https://myaccount.google.com/permissions e ripetere la connessione.", 'danger'
+                "Google non ha restituito un refresh_token. Prova a scollegare l'account e ripetere la connessione.",
+                'danger'
             )
             return redirect(url_for('admin_google_status'))
 
-        # Recupera l'email dell'account collegato
         userinfo = http_requests.get(
             'https://www.googleapis.com/oauth2/v2/userinfo',
             headers={'Authorization': f'Bearer {creds.token}'}, timeout=10
         ).json()
         email_google = userinfo.get('email', 'sconosciuta')
 
-        # Design a singola connessione attiva: rimuovo eventuali precedenti
         GoogleConnessione.query.delete()
 
         connessione = GoogleConnessione(
@@ -2785,7 +2421,6 @@ def admin_google_disconnect():
 
     connessione = _connessione_google_attiva()
     if connessione:
-        # Best-effort: prova a revocare il token lato Google (non blocca in caso di errore)
         try:
             refresh_token = _decifra_token(connessione.refresh_token_cifrato)
             http_requests.post(
@@ -2805,33 +2440,6 @@ def admin_google_disconnect():
     return redirect(url_for('admin_google_status'))
 
 
-# ==================== FASE B - STEP 2: ASSOCIAZIONE SALA <-> CALENDARIO ====================
-#
-# Scope di questo step: tabella + UI per associare a ciascuna sala il proprio
-# calendario Google (uno solo per sala). L'elenco dei calendari mostrati in UI
-# viene dallo stesso account già collegato nello Step 1 (calendarList()), che
-# può includere anche calendari di altri organizzatori se condivisi con
-# quell'account. Nessun import/export reale in questo step (arriva in Step 3/4).
-
-def _elenca_calendari_google():
-    """Ritorna (lista_calendari, errore). lista_calendari è None se non c'è
-    una connessione attiva o se la chiamata fallisce."""
-    connessione = _connessione_google_attiva()
-    if not connessione:
-        return None, None
-    try:
-        creds = _credenziali_google(connessione)
-        service = google_build('calendar', 'v3', credentials=creds)
-        risultato = service.calendarList().list(maxResults=250).execute()
-        connessione.ultimo_utilizzo = datetime.utcnow()
-        db.session.commit()
-        return risultato.get('items', []), None
-    except GoogleHttpError as e:
-        return None, f"Errore dall'API Google: {e}"
-    except Exception as e:
-        return None, f"Errore durante il recupero dei calendari: {e}"
-
-
 @app.route('/admin/google/sale')
 @login_required
 def admin_google_sale():
@@ -2849,7 +2457,6 @@ def admin_google_sale():
         return redirect(url_for('admin_google_status'))
 
     calendari, errore_calendari = _elenca_calendari_google()
-
     sale = Sala.query.order_by(Sala.nome).all()
     associazioni = {a.sala_id: a for a in CalendarioGoogle.query.all()}
 
@@ -2875,8 +2482,6 @@ def admin_google_sale_associa(sala_id):
         flash('Seleziona un calendario da associare.', 'warning')
         return redirect(url_for('admin_google_sale'))
 
-    # Il nome lo recuperiamo dall'elenco appena mostrato in pagina (passato come campo nascosto)
-    # per non dover richiamare l'API Google solo per il display name.
     nome_calendario = (request.form.get('nome_calendario') or google_calendar_id).strip()
 
     associazione = CalendarioGoogle.query.filter_by(sala_id=sala_id).first()
@@ -2915,33 +2520,11 @@ def admin_google_sale_rimuovi(sala_id):
     return redirect(url_for('admin_google_sale'))
 
 
-# ==================== FASE B - STEP 3: IMPORT MANUALE CON ANTEPRIMA/DIFF ====================
-#
-# Scope: l'admin sceglie un calendario SORGENTE (tra tutti quelli visibili
-# dall'account Google collegato, non necessariamente quello associato alla
-# sala) e un range "oggi + N giorni". Per ogni evento Google trovato nel
-# periodo, l'app mostra un'anteprima con lo stato (nuovo/modificato/invariato)
-# e l'admin sceglie l'azione riga per riga PRIMA che qualsiasi modifica venga
-# applicata al database. Fuso orario di riferimento fisso: Europe/Rome.
-# Eventi "intera giornata" non sono supportati in questa versione (compaiono
-# in anteprima come non importabili). Le occorrenze di eventi ricorrenti nel
-# periodo vengono già espanse da Google stesso (singleEvents=True) e importate
-# come eventi singoli indipendenti, senza alcun legame con la ricorrenza.
-
-from zoneinfo import ZoneInfo
-
-FUSO_ORARIO_APP = ZoneInfo('Europe/Rome')
-
-
 def _parse_datetime_google(valore_iso):
-    """Converte una stringa dateTime RFC3339 di Google in un datetime timezone-aware."""
     return datetime.fromisoformat(valore_iso.replace('Z', '+00:00'))
 
 
 def _layout_default_per_sala(sala_id):
-    """Trova il layout da usare per un evento importato: preferisce il default
-    'generico' (genere_evento_id NULL), altrimenti un default qualsiasi di
-    quella sala. Ritorna None se la sala non ha nessun layout di default."""
     layout = LayoutPosti.query.filter_by(sala_id=sala_id, genere_evento_id=None, is_default=True).first()
     if not layout:
         layout = LayoutPosti.query.filter_by(sala_id=sala_id, is_default=True).first()
@@ -2963,9 +2546,6 @@ def _crea_posti_griglia(evento):
 
 
 def _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, google_event_id, gestore_id=None, genere_evento_id_scelto=None):
-    """Crea un nuovo Evento prenotabile a partire da un evento Google importato,
-    usando il layout di default della sala scelta. Ritorna (evento, None) oppure
-    (None, messaggio_errore) se la sala non ha un layout di default idoneo."""
     layout = _layout_default_per_sala(sala_id)
     if not layout:
         return None, 'nessun layout di default configurato per questa sala'
@@ -2976,8 +2556,6 @@ def _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata
     if posti_max > limite:
         return None, f'il layout di default ({posti_max} posti) supera la capacità della sala ({limite})'
 
-    # Genere: quello scelto esplicitamente nell'import ha priorità; altrimenti
-    # resta il comportamento precedente (genere collegato al layout di default).
     genere_finale = genere_evento_id_scelto if genere_evento_id_scelto is not None else layout.genere_evento_id
 
     evento = Evento(
@@ -2999,8 +2577,6 @@ def _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata
 
 
 def _recupera_eventi_google_range(service, calendar_id, giorni):
-    """Eventi Google nel periodo [ora, ora+giorni]; singleEvents=True fa sì che
-    Google stesso espanda le occorrenze di eventi ricorrenti come voci singole."""
     ora = datetime.now(FUSO_ORARIO_APP)
     time_min = ora.isoformat()
     time_max = (ora + timedelta(days=giorni)).isoformat()
@@ -3019,8 +2595,6 @@ def _recupera_eventi_google_range(service, calendar_id, giorni):
 
 
 def _normalizza_evento_google(item):
-    """Estrae i campi rilevanti nel fuso Europe/Rome. Ritorna None se l'evento
-    è 'intera giornata' (nessun orario), non supportato in questa versione."""
     start, end = item.get('start', {}), item.get('end', {})
     if 'dateTime' not in start or 'dateTime' not in end:
         return None
@@ -3247,8 +2821,6 @@ def admin_google_import_applica():
             contatori['importati'] += 1
 
         elif azione == 'mantieni_entrambi':
-            # Evento aggiuntivo separato, SENZA google_event_id: l'evento originale
-            # resta l'unico collegato a questo id Google nei futuri import.
             _, errore = _crea_evento_da_import(
                 sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, None,
                 gestore_id=gestore_id_import, genere_evento_id_scelto=genere_scelto
@@ -3281,13 +2853,9 @@ def admin_google_import_applica():
     return redirect(url_for('admin_google_import', calendar_id=calendar_id, giorni=giorni, gestore_id=gestore_id_import))
 
 
-
-# ==================== FASE D - STEP 1: STAMPA PDF A3 (MAPPA POSTI + PRENOTAZIONI) ====================
-#
-# Genera un PDF A3 orizzontale con 2 pagine: mappa posti (con il nome di chi ha
-# prenotato scritto su ogni posto occupato) ed elenco prenotazioni con una
-# casella da barrare a penna. Uso previsto: riferimento cartaceo in sala per
-# accompagnare le persone al proprio posto.
+# ==============================================================================
+# 10. GENERAZIONE DOCUMENTALE PDF (REPORTLAB A3)
+# ==============================================================================
 
 def _parse_corridoi_pdf(valore):
     if not valore:
@@ -3318,7 +2886,7 @@ def _genera_pdf_evento(evento):
     width, height = page_size
     c = pdfcanvas.Canvas(buffer, pagesize=page_size)
 
-    # ---------------- Pagina 1: mappa posti ----------------
+    # Pagina 1: mappa posti
     c.setFont('Helvetica-Bold', 18)
     c.drawString(15 * mm, height - 15 * mm, evento.nome)
     c.setFont('Helvetica', 11)
@@ -3364,7 +2932,7 @@ def _genera_pdf_evento(evento):
 
     c.showPage()
 
-    # ---------------- Pagina 2: elenco prenotazioni ----------------
+    # Pagina 2: elenco prenotazioni e foglio presenze
     c.setFont('Helvetica-Bold', 16)
     c.drawString(15 * mm, height - 15 * mm, f"Elenco prenotazioni — {evento.nome}")
     c.setFont('Helvetica', 9)
@@ -3396,7 +2964,7 @@ def _genera_pdf_evento(evento):
         contatto = p.utente.email or p.utente.cellulare or ''
         posti_str = ', '.join(sorted(f"{s.fila}{s.colonna}" for s in p.posti))
 
-        c.rect(15 * mm, y - 4 * mm, 6 * mm, 6 * mm)  # casella vuota da barrare a penna
+        c.rect(15 * mm, y - 4 * mm, 6 * mm, 6 * mm)
         c.drawString(30 * mm, y, nome_display[:38])
         c.drawString(110 * mm, y, contatto[:38])
         c.drawString(200 * mm, y, posti_str[:35])
@@ -3426,7 +2994,288 @@ def stampa_evento_pdf(event_id):
     )
 
 
-# Migrazioni idempotenti eseguite all'avvio del worker (prima di servire richieste).
+# ==============================================================================
+# 11. MIGRAZIONI E STARTUP HOOKS
+# ==============================================================================
+
+def _run_startup_migrations():
+    try:
+        inspector = inspect(db.engine)
+
+        if 'prenotazione' in inspector.get_table_names():
+            cols = {c['name'] for c in inspector.get_columns('prenotazione')}
+            if 'presente' not in cols:
+                db.session.execute(text(
+                    "ALTER TABLE prenotazione ADD COLUMN presente BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
+                app.logger.info('startup-migration: aggiunta prenotazione.presente')
+            if 'check_in_at' not in cols:
+                db.session.execute(text(
+                    "ALTER TABLE prenotazione ADD COLUMN check_in_at TIMESTAMP"
+                ))
+                app.logger.info('startup-migration: aggiunta prenotazione.check_in_at')
+            if 'check_in_da' not in cols:
+                db.session.execute(text(
+                    "ALTER TABLE prenotazione ADD COLUMN check_in_da INTEGER REFERENCES utente(id)"
+                ))
+                app.logger.info('startup-migration: aggiunta prenotazione.check_in_da')
+
+        db.session.commit()
+        app.logger.info("Migrazioni di avvio completate (o gia' presenti).")
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f'Migrazioni di avvio fallite: {e}')
+
+
+@app.route('/init-db')
+@login_required
+def init_db():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+    db.create_all()
+    return 'Database inizializzato!'
+
+
+@app.route('/admin/migrate-layout-posti')
+@login_required
+def migrate_layout_posti():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    esiti, aggiunte = [], []
+    try:
+        inspector = inspect(db.engine)
+        tables = inspector.get_table_names()
+
+        if 'layout_posti' not in tables or 'genere_evento' not in tables:
+            return (
+                "Le tabelle 'layout_posti' e/o 'genere_evento' non esistono ancora. "
+                "Visita <a href='/init-db'>/init-db</a> prima di eseguire questa migrazione."
+            ), 400
+
+        sala_columns = [col['name'] for col in inspector.get_columns('sala')]
+        if 'overbooking_max' not in sala_columns:
+            db.session.execute(text("ALTER TABLE sala ADD COLUMN overbooking_max INTEGER NOT NULL DEFAULT 0"))
+            aggiunte.append('sala.overbooking_max')
+        else:
+            esiti.append("sala.overbooking_max esiste già")
+
+        evento_columns = [col['name'] for col in inspector.get_columns('evento')]
+        if 'layout_posti_id' not in evento_columns:
+            db.session.execute(text("ALTER TABLE evento ADD COLUMN layout_posti_id INTEGER REFERENCES layout_posti(id)"))
+            aggiunte.append('evento.layout_posti_id')
+        else:
+            esiti.append("evento.layout_posti_id esiste già")
+
+        if 'genere_evento_id' not in evento_columns:
+            db.session.execute(text("ALTER TABLE evento ADD COLUMN genere_evento_id INTEGER REFERENCES genere_evento(id)"))
+            aggiunte.append('evento.genere_evento_id')
+        else:
+            esiti.append("evento.genere_evento_id esiste già")
+
+        if 'overbooking_abilitato' not in evento_columns:
+            db.session.execute(text("ALTER TABLE evento ADD COLUMN overbooking_abilitato BOOLEAN NOT NULL DEFAULT FALSE"))
+            aggiunte.append('evento.overbooking_abilitato')
+        else:
+            esiti.append("evento.overbooking_abilitato esiste già")
+
+        layout_columns = [col['name'] for col in inspector.get_columns('layout_posti')]
+        if 'overbooking_abilitato' not in layout_columns:
+            db.session.execute(text("ALTER TABLE layout_posti ADD COLUMN overbooking_abilitato BOOLEAN NOT NULL DEFAULT FALSE"))
+            aggiunte.append('layout_posti.overbooking_abilitato')
+        else:
+            esiti.append("layout_posti.overbooking_abilitato esiste già")
+
+        if aggiunte:
+            db.session.commit()
+            return (
+                "✅ Migrazione completata!<br>"
+                f"Colonne aggiunte: {', '.join(aggiunte)}<br>"
+                f"{'<br>'.join(esiti)}"
+            )
+        return "ℹ️ Nessuna migrazione necessaria, colonne già presenti.<br>" + '<br>'.join(esiti)
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+@app.route('/admin/migrate-google-import')
+@login_required
+def migrate_google_import():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    esiti, aggiunte = [], []
+    try:
+        inspector = inspect(db.engine)
+        evento_columns = [col['name'] for col in inspector.get_columns('evento')]
+
+        colonne_da_aggiungere = [
+            ('origine', "ALTER TABLE evento ADD COLUMN origine VARCHAR(20) NOT NULL DEFAULT 'app'"),
+            ('google_event_id', "ALTER TABLE evento ADD COLUMN google_event_id VARCHAR(255)"),
+            ('google_calendar_id_origine', "ALTER TABLE evento ADD COLUMN google_calendar_id_origine VARCHAR(255)"),
+            ('google_updated', "ALTER TABLE evento ADD COLUMN google_updated TIMESTAMP"),
+            ('cancellato_google', "ALTER TABLE evento ADD COLUMN cancellato_google BOOLEAN NOT NULL DEFAULT FALSE"),
+        ]
+
+        for nome_colonna, ddl in colonne_da_aggiungere:
+            if nome_colonna not in evento_columns:
+                db.session.execute(text(ddl))
+                aggiunte.append(f'evento.{nome_colonna}')
+            else:
+                esiti.append(f"evento.{nome_colonna} esiste già")
+
+        indici_esistenti = [idx['name'] for idx in inspector.get_indexes('evento')]
+        if 'ix_evento_google_event_id' not in indici_esistenti:
+            db.session.execute(text("CREATE INDEX ix_evento_google_event_id ON evento (google_event_id)"))
+            aggiunte.append('indice ix_evento_google_event_id')
+
+        if aggiunte:
+            db.session.commit()
+            return f"✅ Migrazione completata!<br>Aggiunte: {', '.join(aggiunte)}<br>{'<br>'.join(esiti)}"
+        return "ℹ️ Nessuna migrazione necessaria.<br>" + '<br>'.join(esiti)
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+@app.route('/admin/migrate-generi-gestore')
+@login_required
+def migrate_generi_gestore():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    esiti, aggiunte = [], []
+    try:
+        inspector = inspect(db.engine)
+        colonne_esistenti = [col['name'] for col in inspector.get_columns('genere_evento')]
+
+        colonne_da_aggiungere = [
+            ('gestore_id', "ALTER TABLE genere_evento ADD COLUMN gestore_id INTEGER REFERENCES gestore(id)"),
+            ('descrizione_aggiuntiva', "ALTER TABLE genere_evento ADD COLUMN descrizione_aggiuntiva TEXT"),
+            ('logo', "ALTER TABLE genere_evento ADD COLUMN logo BYTEA"),
+            ('logo_mimetype', "ALTER TABLE genere_evento ADD COLUMN logo_mimetype VARCHAR(50)"),
+        ]
+
+        for nome_colonna, ddl in colonne_da_aggiungere:
+            if nome_colonna not in colonne_esistenti:
+                db.session.execute(text(ddl))
+                aggiunte.append(f'genere_evento.{nome_colonna}')
+            else:
+                esiti.append(f"genere_evento.{nome_colonna} esiste già")
+
+        indici_esistenti = [idx['name'] for idx in inspector.get_indexes('genere_evento')]
+        if 'ix_genere_evento_gestore_id' not in indici_esistenti:
+            db.session.execute(text("CREATE INDEX ix_genere_evento_gestore_id ON genere_evento (gestore_id)"))
+            aggiunte.append('indice ix_genere_evento_gestore_id')
+
+        if aggiunte:
+            db.session.commit()
+            return f"✅ Migrazione completata!<br>Aggiunto: {', '.join(aggiunte)}<br>{'<br>'.join(esiti)}"
+        return "ℹ️ Nessuna migrazione necessaria.<br>" + '<br>'.join(esiti)
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+@app.route('/admin/migrate-prenotazione-checkin')
+@login_required
+def migrate_prenotazione_checkin():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    esiti, aggiunte = [], []
+    try:
+        inspector = inspect(db.engine)
+        colonne_esistenti = [col['name'] for col in inspector.get_columns('prenotazione')]
+
+        colonne_da_aggiungere = [
+            ('presente', "ALTER TABLE prenotazione ADD COLUMN presente BOOLEAN NOT NULL DEFAULT FALSE"),
+            ('check_in_at', "ALTER TABLE prenotazione ADD COLUMN check_in_at TIMESTAMP"),
+            ('check_in_da', "ALTER TABLE prenotazione ADD COLUMN check_in_da INTEGER REFERENCES utente(id)"),
+        ]
+
+        for nome_colonna, ddl in colonne_da_aggiungere:
+            if nome_colonna not in colonne_esistenti:
+                db.session.execute(text(ddl))
+                aggiunte.append(f'prenotazione.{nome_colonna}')
+            else:
+                esiti.append(f"prenotazione.{nome_colonna} esiste già")
+
+        if aggiunte:
+            db.session.commit()
+            return f"✅ Migrazione completata!<br>Aggiunto: {', '.join(aggiunte)}<br>{'<br>'.join(esiti)}"
+        return "ℹ️ Nessuna migrazione necessaria.<br>" + '<br>'.join(esiti)
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+@app.route('/admin/migrate-evento-gestore')
+@login_required
+def migrate_evento_gestore():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    try:
+        inspector = inspect(db.engine)
+        colonne_esistenti = [col['name'] for col in inspector.get_columns('evento')]
+
+        if 'gestore_id' not in colonne_esistenti:
+            db.session.execute(text("ALTER TABLE evento ADD COLUMN gestore_id INTEGER REFERENCES gestore(id)"))
+            indici_esistenti = [idx['name'] for idx in inspector.get_indexes('evento')]
+            if 'ix_evento_gestore_id' not in indici_esistenti:
+                db.session.execute(text("CREATE INDEX ix_evento_gestore_id ON evento (gestore_id)"))
+            db.session.commit()
+            return "✅ Migrazione completata!<br>Aggiunto: evento.gestore_id (+ indice)"
+        return "ℹ️ Nessuna migrazione necessaria, evento.gestore_id esiste già."
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+@app.route('/admin/migrate-sala-gestore')
+@login_required
+def migrate_sala_gestore():
+    if not current_user.is_admin():
+        abort(403)
+    secret = app.config.get('MIGRATION_SECRET')
+    if not secret or request.args.get('key') != secret:
+        abort(403)
+
+    try:
+        inspector = inspect(db.engine)
+        colonne_esistenti = [col['name'] for col in inspector.get_columns('sala')]
+
+        if 'gestore_default_id' not in colonne_esistenti:
+            db.session.execute(text("ALTER TABLE sala ADD COLUMN gestore_default_id INTEGER REFERENCES gestore(id)"))
+            db.session.commit()
+            return "✅ Migrazione completata!<br>Aggiunto: sala.gestore_default_id"
+        return "ℹ️ Nessuna migrazione necessaria, sala.gestore_default_id esiste già."
+    except Exception as e:
+        db.session.rollback()
+        return f"❌ Errore durante la migrazione: {str(e)}", 500
+
+
+# Esecuzione automatica creazioni e migrazioni all'avvio del worker
 with app.app_context():
     db.create_all()
     _run_startup_migrations()
