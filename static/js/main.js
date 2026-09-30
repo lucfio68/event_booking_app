@@ -193,3 +193,24 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+/* === CARICA LISTA DEI LAYOUT (OPZIONALE) === */
+function loadLayouts() {
+    fetch('/api/layouts')
+        .then(r => r.json())
+        .then(data => {
+            var container = document.getElementById('layoutList');
+            if (!container) return;
+            container.innerHTML = '';
+            data.forEach(layout => {
+                var div = document.createElement('div');
+                div.className = 'layout-item';
+                div.innerHTML = `
+                    <span>${layout.name} (${layout.rows}x${layout.cols})</span>
+                    <button class="btn-modifica-layout" data-layout-id="${layout.id}">Modifica</button>
+                `;
+                container.appendChild(div);
+            });
+        })
+        .catch(err => showMessage('errorBox', 'Errore caricamento layout list', 'danger'));
+}
