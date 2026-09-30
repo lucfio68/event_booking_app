@@ -1,5 +1,7 @@
-// static/js/main.js
-// Utility generale e SeatRenderer universale
+/* static/js/main.js
+   Utility generale e SeatRenderer universale
+   Aggiunta funzionalità di modifica layout per Gestione Layout Posti
+*/
 
 document.addEventListener('DOMContentLoaded', function() {
     // Chiudi modali cliccando fuori
@@ -7,6 +9,16 @@ document.addEventListener('DOMContentLoaded', function() {
         modal.addEventListener('click', function(e) {
             if (e.target === this) {
                 this.style.display = 'none';
+            }
+        });
+    });
+
+    // Gestione pulsante "Modifica" sui layout
+    document.querySelectorAll('.btn-modifica-layout').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const layoutId = this.dataset.layoutId;
+            if (layoutId) {
+                openModifyLayoutModal(layoutId);
             }
         });
     });
@@ -22,7 +34,7 @@ function showMessage(elementId, message, type) {
     setTimeout(function() { el.style.display = 'none'; }, 5000);
 }
 
-// === SEAT RENDERER UNIVERSALE ===
+/* === SEAT RENDERER UNIVERSALE === */
 window.SeatRenderer = {
     render: function(containerId, seatsData, options) {
         options = options || {};
@@ -126,3 +138,58 @@ window.SeatRenderer = {
         }
     }
 };
+
+/* === FUNZIONE DI MODIFICA LAYOUT === */
+function openModifyLayoutModal(layoutId) {
+    // Carica i dati del layout e mostra il modal di modifica
+    fetch(`/api/layouts/${layoutId}`)
+        .then(r => r.json())
+        .then(data => {
+            // popola modal (id #modifyLayoutModal) con i dati
+            var modal = document.getElementById('modifyLayoutModal');
+            if (!modal) return;
+            document.getElementById('layoutName').value = data.name;
+            document.getElementById('layoutRows').value = data.rows;
+            document.getElementById('layoutCols').value = data.cols;
+            modal.dataset.layoutId = layoutId;
+            modal.style.display = 'block';
+        })
+        .catch(err => showMessage('errorBox', 'Errore caricamento layout', 'danger'));
+}
+
+function submitModifyLayout() {
+    var modal = document.getElementById('modifyLayoutModal');
+    var layoutId = modal.dataset.layoutId;
+    var payload = {
+        name: document.getElementById('layoutName').value,
+        rows: parseInt(document.getElementById('layoutRows').value, 10),
+        cols: parseInt(document.getElementById('layoutCols').value, 10)
+    };
+    fetch(`/api/layouts/${layoutId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => {
+        if (r.ok) {
+            showMessage('successBox', 'Layout modificato con successo', 'success');
+            modal.style.display = 'none';
+            // Aggiorna la lista dei layout, se esiste
+            if (typeof loadLayouts === 'function') loadLayouts();
+        } else {
+            return r.text().then(t => { throw new Error(t); });
+        }
+    })
+    .catch(err => showMessage('errorBox', 'Errore modifica layout: ' + err.message, 'danger'));
+}
+
+// Event listener per il submit del form di modifica
+document.addEventListener('DOMContentLoaded', function() {
+    var form = document.getElementById('formModifyLayout');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            submitModifyLayout();
+        });
+    }
+});
