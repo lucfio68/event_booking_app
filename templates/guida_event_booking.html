@@ -644,13 +644,14 @@
         <div class="step-content">
             <h4>Scrivi il nuovo nome</h4>
             <p>Il campo e' precompilato con il nome attuale (massimo 150 caratteri, non puo' restare vuoto).</p>
+            <p><strong>Senza la spunta</strong> del passo successivo, il nome cambia <strong>solo sul posto</strong> su cui hai fatto doppio click (o sui posti selezionati). Se la prenotazione comprendeva piu' posti, quel posto viene separato in una prenotazione a se' con il nuovo nome e gli altri mantengono il nome precedente.</p>
         </div>
     </div>
     <div class="step">
         <div class="step-num">3</div>
         <div class="step-content">
             <h4>Applicalo anche alle altre prenotazioni (facoltativo)</h4>
-            <p>Spunta <strong>Applica a tutte le prenotazioni con lo stesso nome</strong> per cambiare il nome anche sulle altre tue prenotazioni di <strong>questo evento</strong> che hanno lo stesso nome (maiuscole e minuscole non contano). Se la prenotazione non aveva un nome, vengono aggiornate solo le tue prenotazioni senza nome.</p>
+            <p>Spunta <strong>Applica a tutte le prenotazioni con lo stesso nome</strong> per cambiare il nome su <strong>tutti i posti</strong> di <strong>questo evento</strong> che hanno lo stesso nome attuale (maiuscole e minuscole non contano), compresi gli altri posti della stessa prenotazione e le tue altre prenotazioni. Se la prenotazione non aveva un nome, vengono aggiornate solo le tue prenotazioni senza nome.</p>
         </div>
     </div>
     <div class="step">
@@ -1267,6 +1268,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
     <p>Dalla mappa posti dell'evento (<strong>Prenota</strong> dal calendario) l'amministratore puo' rinominare una prenotazione con <strong>doppio click</strong> sul posto o con il pulsante <strong>✏️ Modifica nome</strong> (procedura completa nella sezione <a href="#utente-prenotazione">2.4</a>). Rispetto all'utente:</p>
     <ul>
         <li>puo' modificare il nome di <strong>qualsiasi</strong> prenotazione, anche di altri utenti e anche se <strong>riservata</strong> o <strong>abbonata</strong> (posti azzurri, arancioni e viola);</li>
+        <li>senza la spunta il nome cambia solo sul posto (o sui posti selezionati) e, se la prenotazione ne comprende altri, il posto viene separato in una prenotazione a parte;</li>
         <li>con la spunta <strong>Applica a tutte le prenotazioni con lo stesso nome</strong> il nuovo nome viene applicato a tutte le prenotazioni <strong>dell'evento</strong> con quel nome, di qualsiasi utente e stato. Per le prenotazioni senza nome vale solo lo stesso utente.</li>
     </ul>
     <div class="alert alert-info">
@@ -1925,7 +1927,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
 
     <h3>v2.3 (2026)</h3>
     <ul>
-        <li><strong>Nuovo:</strong> Prenotare un Posto (2.4) e Gestione Prenotazioni (3.10) — modifica del nome di una prenotazione gia' inserita: doppio click sul posto o pulsante "✏️ Modifica nome", con finestra dedicata e spunta per applicare il nuovo nome a tutte le prenotazioni dell'evento con lo stesso nome (nuova API <code>POST /api/prenotazione/&lt;id&gt;/rinomina</code>)</li>
+        <li><strong>Nuovo:</strong> Prenotare un Posto (2.4) e Gestione Prenotazioni (3.10) — modifica del nome di una prenotazione gia' inserita: doppio click sul posto o pulsante "✏️ Modifica nome", con finestra dedicata: il nome cambia solo sul posto scelto (se la prenotazione ne comprende altri, il posto viene separato in una prenotazione a parte), oppure, con la spunta, su tutte le prenotazioni dell'evento con lo stesso nome (nuova API <code>POST /api/prenotazione/&lt;id&gt;/rinomina</code>)</li>
         <li><strong>Sicurezza:</strong> i nomi delle prenotazioni mostrati sulla mappa posti vengono ora "escapati" (prevenzione XSS)</li>
         <li><strong>Tecnico:</strong> service worker aggiornato a v1.5 per rinnovare la cache della pagina di prenotazione</li>
     </ul>

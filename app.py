@@ -1193,6 +1193,9 @@ def api_prenotazione_rinomina(prenotazione_id):
     data = request.get_json(silent=True) or {}
     nuovo_nome = (data.get('nome_prenotazione') or '').strip()
     applica_a_tutte = bool(data.get('applica_a_tutte'))
+    posti_ids = data.get('posti_ids') or []
+    if not isinstance(posti_ids, list):
+        return jsonify({'error': 'Posti non validi'}), 400
 
     if not nuovo_nome:
         return jsonify({'error': 'Il nome non può essere vuoto'}), 400
@@ -1212,9 +1215,12 @@ def api_prenotazione_rinomina(prenotazione_id):
                 return jsonify({'error': 'Evento passato: modifica non consentita'}), 400
 
         vecchio_nome = pren.nome_prenotazione
-        da_aggiornare = [pren]
+        diviso = False
 
         if applica_a_tutte:
+            # Spunta attiva: il nuovo nome vale per TUTTE le prenotazioni dell'evento
+            # con lo stesso nome (e quindi per tutti i loro posti).
+            da_aggiornare = [pren]
             q = Prenotazione.query.filter(
                 Prenotazione.evento_id == pren.evento_id,
                 Prenotazione.id != pren.id
@@ -1233,15 +1239,51 @@ def api_prenotazione_rinomina(prenotazione_id):
                     Prenotazione.stato == 'confermata'
                 )
             da_aggiornare += q.with_for_update().all()
+            for p in da_aggiornare:
+                p.nome_prenotazione = nuovo_nome
+        else:
+            # Spunta non attiva: cambia SOLO il nome dei posti indicati. Il nome e' salvato
+            # sulla prenotazione, quindi se i posti indicati sono solo una parte dei posti
+            # della prenotazione, vengono staccati in una nuova prenotazione con il nuovo nome.
+            try:
+                richiesti = {int(x) for x in posti_ids}
+            except (TypeError, ValueError):
+                return jsonify({'error': 'Posti non validi'}), 400
 
-        for p in da_aggiornare:
-            p.nome_prenotazione = nuovo_nome
+            posti_pren = Posto.query.filter_by(prenotazione_id=pren.id).with_for_update().all()
+            ids_pren = {p.id for p in posti_pren}
+
+            if richiesti and not richiesti.issubset(ids_pren):
+                return jsonify({'error': 'I posti indicati non appartengono a questa prenotazione'}), 400
+
+            if richiesti and richiesti != ids_pren:
+                nuova = Prenotazione(
+                    evento_id=pren.evento_id,
+                    utente_id=pren.utente_id,
+                    nome_prenotazione=nuovo_nome,
+                    stato=pren.stato,
+                    data_prenotazione=pren.data_prenotazione,
+                    presente=pren.presente,
+                    check_in_at=pren.check_in_at,
+                    check_in_da=pren.check_in_da
+                )
+                db.session.add(nuova)
+                db.session.flush()
+                for p in posti_pren:
+                    if p.id in richiesti:
+                        p.prenotazione_id = nuova.id
+                da_aggiornare = [nuova]
+                diviso = True
+            else:
+                pren.nome_prenotazione = nuovo_nome
+                da_aggiornare = [pren]
 
         db.session.commit()
         return jsonify({
             'success': True,
             'nome_prenotazione': nuovo_nome,
-            'prenotazioni_aggiornate': [p.id for p in da_aggiornare]
+            'prenotazioni_aggiornate': [p.id for p in da_aggiornare],
+            'diviso': diviso
         })
     except Exception as e:
         db.session.rollback()

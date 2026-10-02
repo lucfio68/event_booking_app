@@ -619,6 +619,7 @@ document.getElementById('input-nome').addEventListener('keypress', function(e) {
 });
 
 let renamePrenId = null;
+let renamePostiIds = [];
 
 const seatsContainer = document.getElementById('seats-container');
 
@@ -640,17 +641,22 @@ seatsContainer.addEventListener('dblclick', function(e) {
 });
 
 function apriRinomina(el) {
+    let ids;
     if (!el) {  // chiamata dal pulsante: usa i posti selezionati
         const pren = new Set();
+        ids = [];
         selectedToDelete.forEach(id => {
             const s = seatsContainer.querySelector(`[data-id="${id}"]`);
-            if (s) { pren.add(s.dataset.pren); el = s; }
+            if (s) { pren.add(s.dataset.pren); el = s; ids.push(id); }
         });
         if (pren.size !== 1) return;
+    } else {
+        ids = [parseInt(el.dataset.id, 10)];  // doppio click: solo il posto cliccato
     }
     if (!el || el.dataset.edit !== 'true' || !el.dataset.pren) return;
 
     renamePrenId = parseInt(el.dataset.pren, 10);
+    renamePostiIds = ids;
     document.getElementById('input-rinomina').value = el.dataset.nome || '';
     document.getElementById('chk-applica-tutte').checked = false;
     document.getElementById('modal-rinomina').classList.add('active');
@@ -660,6 +666,7 @@ function apriRinomina(el) {
 function chiudiRinomina() {
     document.getElementById('modal-rinomina').classList.remove('active');
     renamePrenId = null;
+    renamePostiIds = [];
 }
 
 function eseguiRinomina() {
@@ -667,6 +674,7 @@ function eseguiRinomina() {
     if (!nome) { alert('Il nome non può essere vuoto'); return; }
     const applicaATutte = document.getElementById('chk-applica-tutte').checked;
     const prenId = renamePrenId;
+    const postiIds = renamePostiIds;
     if (!prenId) return;
 
     chiudiRinomina();
@@ -675,7 +683,7 @@ function eseguiRinomina() {
     fetch(`/api/prenotazione/${prenId}/rinomina`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nome_prenotazione: nome, applica_a_tutte: applicaATutte })
+        body: JSON.stringify({ nome_prenotazione: nome, applica_a_tutte: applicaATutte, posti_ids: postiIds })
     })
     .then(r => r.json())
     .then(data => {
