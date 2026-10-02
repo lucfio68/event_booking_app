@@ -32,6 +32,8 @@ from reportlab.lib.pagesizes import A3, landscape
 from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas as pdfcanvas
+from reportlab.lib.utils import simpleSplit
+from reportlab.pdfbase.pdfmetrics import stringWidth
 
 from models import (
     db, Utente, Sala, Evento, Prenotazione, Posto,
@@ -3055,6 +3057,57 @@ def _parse_corridoi_pdf(valore):
     return [int(x.strip()) for x in valore.split(',') if x.strip().isdigit()]
 
 
+def _pdf_righe_nome(testo, font, size, max_w, max_righe=2):
+    """Spezza il nome su al massimo `max_righe` righe larghe non oltre `max_w` punti.
+    Va a capo sugli spazi; una parola piu' larga della cella viene spezzata per caratteri;
+    se il testo non entra, l'ultima riga termina con '...'."""
+    testo = ' '.join((testo or '').split())
+    if not testo:
+        return []
+    righe = []
+    for riga in simpleSplit(testo, font, size, max_w):
+        while stringWidth(riga, font, size) > max_w and len(riga) > 1:
+            n = len(riga)
+            while n > 1 and stringWidth(riga[:n], font, size) > max_w:
+                n -= 1
+            righe.append(riga[:n])
+            riga = riga[n:]
+        righe.append(riga)
+    if len(righe) > max_righe:
+        righe = righe[:max_righe]
+        ultima = righe[-1]
+        while ultima and stringWidth(ultima + '...', font, size) > max_w:
+            ultima = ultima[:-1]
+        righe[-1] = ultima + '...'
+    return righe
+
+
+def _pdf_disegna_posto(c, x, y, cella_w, cella_h, riferimento, occupato, nome):
+    """Disegna una cella della pianta: riferimento del posto (es. B7) in alto a sinistra,
+    grande e in grassetto; nome della prenotazione in basso, su due righe se c'e' spazio.
+    I caratteri si adattano alla dimensione della cella."""
+    pad = 1.2 * mm
+    ref_font = max(7, min(14, cella_h * 0.30, cella_w * 0.30))
+    nome_font = max(5.5, min(8.5, cella_h * 0.17, cella_w * 0.16))
+    leading = nome_font * 1.1
+
+    c.setFillColor(colors.HexColor('#dbeafe') if occupato else colors.white)
+    c.rect(x, y - cella_h, cella_w, cella_h, stroke=1, fill=1)
+
+    c.setFillColor(colors.black)
+    c.setFont('Helvetica-Bold', ref_font)
+    c.drawString(x + pad, y - pad - ref_font * 0.78, riferimento)
+
+    if occupato and nome:
+        spazio_nome = cella_h - (pad + ref_font) - pad
+        max_righe = 2 if spazio_nome >= 2 * leading else 1
+        righe = _pdf_righe_nome(nome, 'Helvetica-Bold', nome_font, cella_w - 2 * pad, max_righe)
+        c.setFont('Helvetica-Bold', nome_font)
+        # l'ultima riga poggia sul fondo della cella, le precedenti salgono
+        for i, riga in enumerate(reversed(righe)):
+            c.drawString(x + pad, y - cella_h + pad + nome_font * 0.2 + i * leading, riga)
+
+
 def _genera_pdf_evento(evento):
     posti = (
         Posto.query.filter_by(evento_id=evento.id)
@@ -3106,15 +3159,10 @@ def _genera_pdf_evento(evento):
         for col in range(1, evento.colonne + 1):
             posto = posti_by_fc.get((fila_lettera, col))
             occupato = posto and posto.stato != 'libero' and posto.prenotazione_id
-            c.setFillColor(colors.HexColor('#dbeafe') if occupato else colors.white)
-            c.rect(x, y - cella_h, cella_w, cella_h, stroke=1, fill=1)
-            c.setFillColor(colors.black)
-            c.setFont('Helvetica', 8)
-            c.drawString(x + 1.5 * mm, y - 4.5 * mm, f"{fila_lettera}{col}")
+            nome = ''
             if occupato:
                 nome = (posto.prenotazione.nome_prenotazione or posto.prenotazione.utente.nome_cognome or '')
-                c.setFont('Helvetica-Bold', 8)
-                c.drawString(x + 1.5 * mm, y - cella_h + 3 * mm, nome[:16])
+            _pdf_disegna_posto(c, x, y, cella_w, cella_h, f"{fila_lettera}{col}", occupato, nome)
             x += cella_w
             if col in corr_col:
                 x += cella_w * 0.4
