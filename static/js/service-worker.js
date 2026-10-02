@@ -1,5 +1,5 @@
-// EventBooking Service Worker v1.4
-const CACHE_NAME = 'eventbooking-v1.4';
+// EventBooking Service Worker v1.5
+const CACHE_NAME = 'eventbooking-v1.5';
 const STATIC_ASSETS = [
   '/static/css/style.css',
   '/static/js/main.js',

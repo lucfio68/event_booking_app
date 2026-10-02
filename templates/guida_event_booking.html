@@ -291,7 +291,7 @@
 <header>
     <h1>📖 Guida EventBooking</h1>
     <p>Manuale completo per utenti e amministratori</p>
-    <span class="version-badge">v1.7</span>
+    <span class="version-badge">v2.3</span>
     {% if current_user.is_authenticated and not current_user.is_admin() %}
     <p style="margin-top:8px; font-size:0.85em; opacity:0.8;">Stai visualizzando la guida in versione <strong>Utente</strong>. Le sezioni riservate agli amministratori sono nascoste.</p>
     {% endif %}
@@ -628,6 +628,43 @@
     </div>
     <div class="alert alert-info">
         <strong>Evento non più disponibile?</strong> Se apri un link di prenotazione salvato in precedenza e l'evento è stato nel frattempo annullato (perché rimosso dal calendario Google di origine), vedrai un messaggio che te lo segnala e verrai riportato al calendario.
+    </div>
+    <h3>Modificare il nome di una prenotazione</h3>
+    <p>Il nome di una prenotazione gia' confermata si puo' cambiare in qualsiasi momento, senza cancellarla e rifarla. Il nome e' l'unica cosa che cambia: i posti restano quelli.</p>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Apri la modifica</h4>
+            <p><strong>Doppio click</strong> su uno dei tuoi posti azzurri: si apre direttamente la finestra di modifica.</p>
+            <p>In alternativa, con un <strong>click singolo</strong> seleziona il posto (diventa rosso lampeggiante) e premi <strong>✏️ Modifica nome</strong>. Il pulsante si attiva solo quando i posti selezionati appartengono a <strong>una sola</strong> prenotazione. Su smartphone, se il doppio tocco non risponde, usa il pulsante.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Scrivi il nuovo nome</h4>
+            <p>Il campo e' precompilato con il nome attuale (massimo 150 caratteri, non puo' restare vuoto).</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Applicalo anche alle altre prenotazioni (facoltativo)</h4>
+            <p>Spunta <strong>Applica a tutte le prenotazioni con lo stesso nome</strong> per cambiare il nome anche sulle altre tue prenotazioni di <strong>questo evento</strong> che hanno lo stesso nome (maiuscole e minuscole non contano). Se la prenotazione non aveva un nome, vengono aggiornate solo le tue prenotazioni senza nome.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            <h4>Salva</h4>
+            <p>Premi <strong>Salva</strong> (o Invio). La mappa si aggiorna; se hai usato la spunta, un messaggio indica su quante prenotazioni e' stato cambiato il nome.</p>
+        </div>
+    </div>
+    <div class="alert alert-info">
+        <strong>Selezione e doppio click:</strong> il click singolo continua a selezionare/deselezionare il posto come sempre. Il doppio click apre solo la modifica del nome e non lascia il posto selezionato, quindi non rischi di cancellarlo per errore. Nulla viene cancellato finche' non premi <strong>Cancella Selezionati</strong>.
+    </div>
+    <div class="alert alert-warning">
+        <strong>Limiti:</strong> l'utente puo' modificare solo le proprie prenotazioni azzurre di eventi non ancora passati. La modifica del nome non invia email.
     </div>
     <div class="screenshot" style="background:#fff; border-style:solid; padding:15px;">
         <svg viewBox="0 0 640 320" xmlns="http://www.w3.org/2000/svg" style="width:100%; max-width:560px; height:auto;">
@@ -1225,6 +1262,16 @@ source venv/bin/activate    (Linux/Mac)</pre>
         <li><strong>Pagina 2 — Elenco prenotazioni:</strong> nome, contatto e posti di ogni prenotazione, con una casella vuota da barrare a penna e una colonna che mostra se il check-in è già stato fatto dall'app</li>
     </ul>
     <p>Si apre in una nuova scheda del browser, pronta per la stampa (Ctrl+P / Cmd+P) o il salvataggio come file.</p>
+
+    <h3>Modificare il nome di una prenotazione</h3>
+    <p>Dalla mappa posti dell'evento (<strong>Prenota</strong> dal calendario) l'amministratore puo' rinominare una prenotazione con <strong>doppio click</strong> sul posto o con il pulsante <strong>✏️ Modifica nome</strong> (procedura completa nella sezione <a href="#utente-prenotazione">2.4</a>). Rispetto all'utente:</p>
+    <ul>
+        <li>puo' modificare il nome di <strong>qualsiasi</strong> prenotazione, anche di altri utenti e anche se <strong>riservata</strong> o <strong>abbonata</strong> (posti azzurri, arancioni e viola);</li>
+        <li>con la spunta <strong>Applica a tutte le prenotazioni con lo stesso nome</strong> il nuovo nome viene applicato a tutte le prenotazioni <strong>dell'evento</strong> con quel nome, di qualsiasi utente e stato. Per le prenotazioni senza nome vale solo lo stesso utente.</li>
+    </ul>
+    <div class="alert alert-info">
+        <strong>Nota:</strong> la modifica riguarda solo il campo <em>nome prenotazione</em> (non l'intestatario dell'account) e non genera email. Il nome aggiornato compare subito sulla mappa, nella ricerca e nella stampa PDF.
+    </div>
 </div>
 
 <div class="section" id="admin-ricerca">
@@ -1818,6 +1865,14 @@ source venv/bin/activate    (Linux/Mac)</pre>
             <li>Non hai effettuato il login</li>
         </ul>
     </div>
+    <h4>🟡 Non riesco a modificare il nome di una prenotazione</h4>
+    <div class="alert alert-warning">
+        <ul>
+            <li>Il pulsante <strong>✏️ Modifica nome</strong> e' grigio: seleziona (click singolo) i posti di <strong>una sola</strong> prenotazione tua</li>
+            <li>Il doppio click funziona solo sui tuoi posti azzurri; i posti di altri utenti, riservati o abbonati li modifica solo un amministratore</li>
+            <li>Dopo un aggiornamento dell'app puoi vedere ancora la pagina vecchia: ricarica la pagina due volte (Ctrl+F5)</li>
+        </ul>
+    </div>
     <h4>🟡 Non ricevo l'email di conferma o di reset password</h4>
     <div class="alert alert-warning">
         <ul>
@@ -1867,6 +1922,13 @@ source venv/bin/activate    (Linux/Mac)</pre>
 {% if current_user.is_admin() %}
 <div class="section" id="changelog">
     <h2>📝 6. Changelog</h2>
+
+    <h3>v2.3 (2026)</h3>
+    <ul>
+        <li><strong>Nuovo:</strong> Prenotare un Posto (2.4) e Gestione Prenotazioni (3.10) — modifica del nome di una prenotazione gia' inserita: doppio click sul posto o pulsante "✏️ Modifica nome", con finestra dedicata e spunta per applicare il nuovo nome a tutte le prenotazioni dell'evento con lo stesso nome (nuova API <code>POST /api/prenotazione/&lt;id&gt;/rinomina</code>)</li>
+        <li><strong>Sicurezza:</strong> i nomi delle prenotazioni mostrati sulla mappa posti vengono ora "escapati" (prevenzione XSS)</li>
+        <li><strong>Tecnico:</strong> service worker aggiornato a v1.5 per rinnovare la cache della pagina di prenotazione</li>
+    </ul>
 
     <h3>v2.2 (2026)</h3>
     <ul>

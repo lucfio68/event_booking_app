@@ -1186,6 +1186,69 @@ def api_prenotazione_toggle_presente(prenotazione_id):
     return jsonify({'success': True, 'presente': pren.presente})
 
 
+@app.route('/api/prenotazione/<int:prenotazione_id>/rinomina', methods=['POST'])
+@login_required
+@limiter.limit("30 per minute")
+def api_prenotazione_rinomina(prenotazione_id):
+    data = request.get_json(silent=True) or {}
+    nuovo_nome = (data.get('nome_prenotazione') or '').strip()
+    applica_a_tutte = bool(data.get('applica_a_tutte'))
+
+    if not nuovo_nome:
+        return jsonify({'error': 'Il nome non può essere vuoto'}), 400
+    if len(nuovo_nome) > 150:
+        return jsonify({'error': 'Nome troppo lungo'}), 400
+
+    try:
+        pren = db.session.get(Prenotazione, prenotazione_id)
+        if not pren:
+            return jsonify({'error': 'Prenotazione non trovata'}), 404
+
+        is_admin = current_user.is_admin()
+        if not is_admin:
+            if pren.utente_id != current_user.id or pren.stato != 'confermata':
+                return jsonify({'error': 'Non puoi modificare questa prenotazione'}), 403
+            if pren.evento.data_evento < date.today():
+                return jsonify({'error': 'Evento passato: modifica non consentita'}), 400
+
+        vecchio_nome = pren.nome_prenotazione
+        da_aggiornare = [pren]
+
+        if applica_a_tutte:
+            q = Prenotazione.query.filter(
+                Prenotazione.evento_id == pren.evento_id,
+                Prenotazione.id != pren.id
+            )
+            if vecchio_nome:
+                q = q.filter(func.lower(Prenotazione.nome_prenotazione) == vecchio_nome.lower())
+            else:
+                # nome vuoto: replica solo sulle prenotazioni senza nome dello stesso utente
+                q = q.filter(
+                    Prenotazione.nome_prenotazione.is_(None),
+                    Prenotazione.utente_id == pren.utente_id
+                )
+            if not is_admin:
+                q = q.filter(
+                    Prenotazione.utente_id == current_user.id,
+                    Prenotazione.stato == 'confermata'
+                )
+            da_aggiornare += q.with_for_update().all()
+
+        for p in da_aggiornare:
+            p.nome_prenotazione = nuovo_nome
+
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'nome_prenotazione': nuovo_nome,
+            'prenotazioni_aggiornate': [p.id for p in da_aggiornare]
+        })
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f'Errore rinomina prenotazione: {e}')
+        return jsonify({'error': 'Errore interno'}), 500
+
+
 @app.route('/api/seats/search/<int:event_id>')
 @login_required
 def api_seats_search(event_id):

@@ -199,6 +199,12 @@
     }
     .corridoio-row { width: 100%; height: var(--corr-h); display: flex; align-items: center; justify-content: center; margin: var(--seat-gap) 0; }
 
+    .seat { touch-action: manipulation; }  /* niente zoom col doppio tap sui posti: il pinch-zoom resta */
+    .btn-edit { background: #3498db; color: white; }
+    .btn-edit:hover { background: #2980b9; }
+    .modal-box .check-row { display: flex; align-items: center; gap: 8px; margin-bottom: 15px; font-size: 0.95em; color: #444; }
+    .modal-box .check-row input[type=checkbox] { width: auto; padding: 0; margin: 0; flex-shrink: 0; }
+
     /* ===== MEDIA QUERY MOBILE ===== */
     @media (max-width: 480px) {
         .booking-container { padding: 10px; }
@@ -257,6 +263,9 @@
             🎫 Abbona Posti
         </button>
         {% endif %}
+        <button id="btn-rinomina" class="btn btn-edit" disabled onclick="apriRinomina()">
+            ✏️ Modifica nome
+        </button>
         <button id="btn-cancella" class="btn btn-delete" disabled onclick="confermaCancella()">
             🗑️ Cancella Selezionati
         </button>
@@ -278,6 +287,21 @@
         <div class="modal-actions">
             <button class="btn-cancel" onclick="chiudiModal()">Annulla</button>
             <button class="btn-confirm" onclick="eseguiAzione()">Conferma</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-rinomina" class="modal-overlay">
+    <div class="modal-box">
+        <h3>Modifica nome prenotazione</h3>
+        <input type="text" id="input-rinomina" maxlength="150">
+        <label class="check-row">
+            <input type="checkbox" id="chk-applica-tutte">
+            Applica a tutte le prenotazioni con lo stesso nome
+        </label>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="chiudiRinomina()">Annulla</button>
+            <button class="btn-confirm" onclick="eseguiRinomina()">Salva</button>
         </div>
     </div>
 </div>
@@ -335,6 +359,11 @@ if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', adattaGrigliaAlViewport);
     window.visualViewport.addEventListener('scroll', adattaGrigliaAlViewport);
     window.addEventListener('resize', adattaGrigliaAlViewport);
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function loadSeats() {
@@ -405,11 +434,13 @@ function renderSeats(posti) {
                 else { cls = 'prenotato-altri'; nome = 'Occupato'; }
             }
 
+            const modificabile = !!p.prenotazione_id && (IS_ADMIN || (p.is_mio && p.stato === 'prenotato'));
+
             if (nome && cls !== 'prenotato-altri') {
-                label = `<div class="nome-pren">${nome}</div>`;
+                label = `<div class="nome-pren">${escapeHtml(nome)}</div>`;
             }
 
-            html += `<div class="seat ${cls}" data-id="${p.id}" data-stato="${p.stato}" data-canc="${cancellabile}" data-clic="${cliccabile}" onclick="toggleSeat(this)">
+            html += `<div class="seat ${cls}" data-id="${p.id}" data-stato="${p.stato}" data-canc="${cancellabile}" data-clic="${cliccabile}" data-pren="${p.prenotazione_id || ''}" data-edit="${modificabile}" data-nome="${escapeHtml(p.nome_prenotazione || '')}">
                 <div>${p.fila}${p.colonna}</div>
                 ${label}
             </div>`;
@@ -481,6 +512,18 @@ function updateButtons() {
     if (btnRiserva) btnRiserva.disabled = selectedSeats.length === 0;
     if (btnCancella) btnCancella.disabled = selectedToDelete.length === 0;
     if (btnAbbona) btnAbbona.disabled = selectedSeats.length === 0;
+
+    const btnRinomina = document.getElementById('btn-rinomina');
+    if (btnRinomina) {
+        const pren = new Set();
+        let ok = selectedToDelete.length > 0;
+        selectedToDelete.forEach(id => {
+            const s = document.querySelector(`#seats-container [data-id="${id}"]`);
+            if (!s || s.dataset.edit !== 'true') ok = false;
+            else pren.add(s.dataset.pren);
+        });
+        btnRinomina.disabled = !(ok && pren.size === 1);
+    }
 }
 
 function conferma(tipo) {
@@ -573,6 +616,83 @@ function eseguiAzione() {
 
 document.getElementById('input-nome').addEventListener('keypress', function(e) {
     if (e.key === 'Enter') eseguiAzione();
+});
+
+let renamePrenId = null;
+
+const seatsContainer = document.getElementById('seats-container');
+
+/* Click singolo = selezione. Sui posti modificabili il 2° click di un doppio click
+   viene ignorato e il dblclick annulla la selezione fatta dal 1°, poi apre il modale.
+   Nessun ritardo sul click singolo. */
+seatsContainer.addEventListener('click', function(e) {
+    const el = e.target.closest('.seat');
+    if (!el) return;
+    if (e.detail > 1 && el.dataset.edit === 'true') return;
+    toggleSeat(el);
+});
+
+seatsContainer.addEventListener('dblclick', function(e) {
+    const el = e.target.closest('.seat');
+    if (!el || el.dataset.edit !== 'true') return;
+    if (el.dataset.clic === 'true') toggleSeat(el);   // annulla il toggle del 1° click
+    apriRinomina(el);
+});
+
+function apriRinomina(el) {
+    if (!el) {  // chiamata dal pulsante: usa i posti selezionati
+        const pren = new Set();
+        selectedToDelete.forEach(id => {
+            const s = seatsContainer.querySelector(`[data-id="${id}"]`);
+            if (s) { pren.add(s.dataset.pren); el = s; }
+        });
+        if (pren.size !== 1) return;
+    }
+    if (!el || el.dataset.edit !== 'true' || !el.dataset.pren) return;
+
+    renamePrenId = parseInt(el.dataset.pren, 10);
+    document.getElementById('input-rinomina').value = el.dataset.nome || '';
+    document.getElementById('chk-applica-tutte').checked = false;
+    document.getElementById('modal-rinomina').classList.add('active');
+    document.getElementById('input-rinomina').focus();
+}
+
+function chiudiRinomina() {
+    document.getElementById('modal-rinomina').classList.remove('active');
+    renamePrenId = null;
+}
+
+function eseguiRinomina() {
+    const nome = document.getElementById('input-rinomina').value.trim();
+    if (!nome) { alert('Il nome non può essere vuoto'); return; }
+    const applicaATutte = document.getElementById('chk-applica-tutte').checked;
+    const prenId = renamePrenId;
+    if (!prenId) return;
+
+    chiudiRinomina();
+    mostraInvio('Salvataggio in corso...');
+
+    fetch(`/api/prenotazione/${prenId}/rinomina`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome_prenotazione: nome, applica_a_tutte: applicaATutte })
+    })
+    .then(r => r.json())
+    .then(data => {
+        nascondiInvio();
+        if (data.success) {
+            const n = (data.prenotazioni_aggiornate || []).length;
+            if (n > 1) alert(`Nome aggiornato su ${n} prenotazioni`);
+            loadSeats();
+        } else {
+            alert(data.error || 'Errore nella modifica');
+        }
+    })
+    .catch(() => { nascondiInvio(); alert('Errore di rete'); });
+}
+
+document.getElementById('input-rinomina').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') eseguiRinomina();
 });
 
 document.addEventListener('DOMContentLoaded', loadSeats);
