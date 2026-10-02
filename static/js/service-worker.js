@@ -1,5 +1,5 @@
-// EventBooking Service Worker v1.5
-const CACHE_NAME = 'eventbooking-v1.5';
+// EventBooking Service Worker v1.6
+const CACHE_NAME = 'eventbooking-v1.6';
 const STATIC_ASSETS = [
   '/static/css/style.css',
   '/static/js/main.js',
@@ -50,6 +50,20 @@ self.addEventListener('fetch', function(event) {
   // Non intercettare richieste POST/PUT/DELETE
   if (event.request.method !== 'GET') {
     event.respondWith(fetch(event.request));
+    return;
+  }
+
+  // Pagine HTML (navigazione): sempre dalla rete, mai dalla cache.
+  // Sono dinamiche e contengono dati (elenco prenotazioni, nomi): servirle dalla cache
+  // mostrerebbe dati vecchi dopo una modifica. La cache resta solo come ultima spiaggia offline.
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(function() {
+        return caches.match(event.request).then(function(cached) {
+          return cached || caches.match('/');
+        });
+      })
+    );
     return;
   }
 

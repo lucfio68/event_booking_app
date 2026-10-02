@@ -1209,7 +1209,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
                 <li><strong>Viola</strong>: Abbonato</li>
                 <li><strong>Giallo lampeggiante</strong>: Risultato ricerca</li>
             </ul>
-            <p>Sui posti azzurri apparira' il <strong>nome della prenotazione</strong> (abbreviato) — lo stesso nome scelto dall'utente al momento della prenotazione, o il suo nome e cognome se non ne ha specificato uno diverso.</p>
+            <p>Sui posti prenotati apparira' il <strong>nome della prenotazione</strong>, scritto in piccolo su piu' righe dentro il posto — lo stesso nome scelto dall'utente al momento della prenotazione (o modificato in seguito, vedi sotto), oppure il suo nome e cognome se non ne ha specificato uno. Passando il mouse sul posto vedi il nome completo e, se diverso, l'account dell'intestatario.</p>
         </div>
     </div>
     <h3>Ricerca posti nella sala</h3>
@@ -1243,6 +1243,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
     <p>Clicca su un posto azzurro per aprire un modale con:</p>
     <ul>
         <li>ID prenotazione</li>
+        <li>Nome della prenotazione</li>
         <li>Nome completo dell'utente</li>
         <li>Email</li>
         <li>Numero di cellulare</li>
@@ -1272,7 +1273,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
         <li>con la spunta <strong>Applica a tutte le prenotazioni con lo stesso nome</strong> il nuovo nome viene applicato a tutte le prenotazioni <strong>dell'evento</strong> con quel nome, di qualsiasi utente e stato. Per le prenotazioni senza nome vale solo lo stesso utente.</li>
     </ul>
     <div class="alert alert-info">
-        <strong>Nota:</strong> la modifica riguarda solo il campo <em>nome prenotazione</em> (non l'intestatario dell'account) e non genera email. Il nome aggiornato compare subito sulla mappa, nella ricerca e nella stampa PDF.
+        <strong>Nota:</strong> la modifica riguarda solo il campo <em>nome prenotazione</em> (non l'intestatario dell'account) e non genera email. Il nome aggiornato compare nella mappa e nell'elenco prenotazioni di Gestione Evento (colonna <strong>Nome prenotazione</strong>), nei dettagli della prenotazione, nella ricerca e nella stampa PDF.
     </div>
 </div>
 
@@ -1929,7 +1930,8 @@ source venv/bin/activate    (Linux/Mac)</pre>
     <ul>
         <li><strong>Nuovo:</strong> Prenotare un Posto (2.4) e Gestione Prenotazioni (3.10) — modifica del nome di una prenotazione gia' inserita: doppio click sul posto o pulsante "✏️ Modifica nome", con finestra dedicata: il nome cambia solo sul posto scelto (se la prenotazione ne comprende altri, il posto viene separato in una prenotazione a parte), oppure, con la spunta, su tutte le prenotazioni dell'evento con lo stesso nome (nuova API <code>POST /api/prenotazione/&lt;id&gt;/rinomina</code>)</li>
         <li><strong>Sicurezza:</strong> i nomi delle prenotazioni mostrati sulla mappa posti vengono ora "escapati" (prevenzione XSS)</li>
-        <li><strong>Tecnico:</strong> service worker aggiornato a v1.5 per rinnovare la cache della pagina di prenotazione</li>
+        <li><strong>Nuovo:</strong> Gestione Evento (3.10) — l'elenco prenotazioni ha la colonna "Nome prenotazione", i dettagli mostrano il nome e il layout scrive il nome per intero (su piu' righe) invece di tagliarlo a 6 caratteri</li>
+        <li><strong>Correzione:</strong> le pagine non vengono piu' servite dalla cache del browser (service worker v1.6), cosi' le modifiche ai nomi compaiono subito</li>
     </ul>
 
     <h3>v2.2 (2026)</h3>

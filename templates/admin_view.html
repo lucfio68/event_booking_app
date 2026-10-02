@@ -79,6 +79,7 @@
                 <tr>
                     <th>ID</th>
                     <th>Utente</th>
+                    <th>Nome prenotazione</th>
                     <th>Email</th>
                     <th>Data Prenotazione</th>
                     <th>Posti</th>
@@ -91,6 +92,7 @@
                 <tr id="prenRow{{ p.id }}">
                     <td>{{ p.id }}</td>
                     <td>{{ p.utente.nome_cognome }}</td>
+                    <td>{{ p.nome_prenotazione or '—' }}</td>
                     <td>{{ p.utente.email }}</td>
                     <td>{{ p.data_prenotazione.strftime('%d/%m/%Y %H:%M') }}</td>
                     <td>{{ p.posti|length }}</td>
@@ -217,8 +219,21 @@
                     seatDiv.setAttribute('data-id', seat.id);
                     seatDiv.setAttribute('data-fila', seat.fila);
                     seatDiv.setAttribute('data-colonna', seat.colonna);
-                    seatDiv.textContent = seat.nome_prenotazione ? seat.nome_prenotazione.substring(0, 6) : seat.colonna;
-                    seatDiv.title = seat.nome_prenotazione ? ('Fila ' + seat.fila + ' Col ' + seat.colonna + ' - ' + seat.nome_prenotazione) : ('Fila ' + seat.fila + ' Col ' + seat.colonna + ' - Libero');
+                    if (seat.nome_prenotazione) {
+                        // nome intero su piu' righe (prima era tagliato a 6 caratteri: "Mario Rossi" e "Mario Verdi" sembravano uguali)
+                        seatDiv.textContent = seat.nome_prenotazione;
+                        Object.assign(seatDiv.style, {
+                            fontSize: '9px', lineHeight: '1.1', padding: '2px', overflow: 'hidden',
+                            wordBreak: 'break-word', textAlign: 'center',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        });
+                    } else {
+                        seatDiv.textContent = seat.colonna;
+                    }
+                    seatDiv.title = seat.nome_prenotazione
+                        ? ('Fila ' + seat.fila + ' Col ' + seat.colonna + ' - ' + seat.nome_prenotazione
+                            + (seat.utente && seat.utente !== seat.nome_prenotazione ? ' (account: ' + seat.utente + ')' : ''))
+                        : ('Fila ' + seat.fila + ' Col ' + seat.colonna + ' - Libero');
                     if (seat.prenotazione_id) {
                         seatDiv.style.cursor = 'pointer';
                         (function(pid) {
@@ -264,6 +279,11 @@
     loadSeats();
 })();
 
+function escHtml(v) {
+    return String(v === null || v === undefined ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function viewPrenotazione(id) {
     fetch('/api/prenotazione/' + id)
         .then(function(r) { return r.json(); })
@@ -279,9 +299,10 @@ function viewPrenotazione(id) {
 
             details.innerHTML = 
                 '<p><strong>ID Prenotazione:</strong> ' + data.id + '</p>' +
-                '<p><strong>Utente:</strong> ' + data.utente.nome + '</p>' +
-                '<p><strong>Email:</strong> ' + data.utente.email + '</p>' +
-                '<p><strong>Cellulare:</strong> ' + (data.utente.cellulare || 'N/D') + '</p>' +
+                '<p><strong>Nome prenotazione:</strong> ' + escHtml(data.nome_prenotazione || '—') + '</p>' +
+                '<p><strong>Utente:</strong> ' + escHtml(data.utente.nome) + '</p>' +
+                '<p><strong>Email:</strong> ' + escHtml(data.utente.email) + '</p>' +
+                '<p><strong>Cellulare:</strong> ' + escHtml(data.utente.cellulare || 'N/D') + '</p>' +
                 '<p><strong>Data Prenotazione:</strong> ' + data.data_prenotazione + '</p>' +
                 '<p><strong>Stato:</strong> ' + data.stato + '</p>' +
                 '<p><strong>Posti:</strong> ' + postiStr + '</p>';
