@@ -3085,27 +3085,41 @@ def _pdf_righe_nome(testo, font, size, max_w, max_righe=2):
 def _pdf_disegna_posto(c, x, y, cella_w, cella_h, riferimento, occupato, nome):
     """Disegna una cella della pianta: riferimento del posto (es. B7) in alto a sinistra,
     grande e in grassetto; nome della prenotazione in basso, su due righe se c'e' spazio.
-    I caratteri si adattano alla dimensione della cella."""
-    pad = 1.2 * mm
-    ref_font = max(7, min(14, cella_h * 0.30, cella_w * 0.30))
-    nome_font = max(5.5, min(8.5, cella_h * 0.17, cella_w * 0.16))
-    leading = nome_font * 1.1
+    I caratteri si adattano alla dimensione della cella e, se serve, si riducono un po'
+    finche' il nome entra per intero (senza '...' e senza parole spezzate)."""
+    pad = 1.5 * mm
+    ref_font = max(7, min(18, cella_h * 0.32, cella_w * 0.30))
+    nome_max = max(5.5, min(13, cella_h * 0.23, cella_w * 0.16))
+    larghezza_utile = cella_w - 2 * pad
 
     c.setFillColor(colors.HexColor('#dbeafe') if occupato else colors.white)
     c.rect(x, y - cella_h, cella_w, cella_h, stroke=1, fill=1)
 
     c.setFillColor(colors.black)
     c.setFont('Helvetica-Bold', ref_font)
-    c.drawString(x + pad, y - pad - ref_font * 0.78, riferimento)
+    c.drawString(x + pad, y - 1.2 * mm - ref_font * 0.78, riferimento)
 
-    if occupato and nome:
-        spazio_nome = cella_h - (pad + ref_font) - pad
+    if not (occupato and nome):
+        return
+
+    testo_pieno = ''.join(nome.split())
+    nome_font = nome_max
+    while True:
+        leading = nome_font * 1.1
+        spazio_nome = cella_h - (1.2 * mm + ref_font) - 1.2 * mm
         max_righe = 2 if spazio_nome >= 2 * leading else 1
-        righe = _pdf_righe_nome(nome, 'Helvetica-Bold', nome_font, cella_w - 2 * pad, max_righe)
-        c.setFont('Helvetica-Bold', nome_font)
-        # l'ultima riga poggia sul fondo della cella, le precedenti salgono
-        for i, riga in enumerate(reversed(righe)):
-            c.drawString(x + pad, y - cella_h + pad + nome_font * 0.2 + i * leading, riga)
+        righe = _pdf_righe_nome(nome, 'Helvetica-Bold', nome_font, larghezza_utile, max_righe)
+        troncato = ''.join(righe).replace(' ', '') != testo_pieno
+        parola_spezzata = any(len(w) > 1 and stringWidth(w, 'Helvetica-Bold', nome_font) > larghezza_utile
+                              for w in nome.split())
+        if (not troncato and not parola_spezzata) or nome_font <= 5.5:
+            break
+        nome_font -= 0.25
+
+    c.setFont('Helvetica-Bold', nome_font)
+    # l'ultima riga poggia sul fondo della cella, le precedenti salgono
+    for i, riga in enumerate(reversed(righe)):
+        c.drawString(x + pad, y - cella_h + 1.2 * mm + nome_font * 0.2 + i * leading, riga)
 
 
 def _genera_pdf_evento(evento):
@@ -3149,8 +3163,9 @@ def _genera_pdf_evento(evento):
 
     colonne_visive = evento.colonne + len(corr_col)
     file_visive = evento.file + len(corr_file)
-    cella_w = min(24 * mm, area_larghezza / max(colonne_visive, 1))
-    cella_h = min(16 * mm, area_altezza / max(file_visive, 1))
+    # tetti alti: con una sala tipica (~12x12) la pianta riempie la pagina A3 e i caratteri restano grandi
+    cella_w = min(34 * mm, area_larghezza / max(colonne_visive, 1))
+    cella_h = min(22 * mm, area_altezza / max(file_visive, 1))
 
     y = height - margine_top
     for f in range(1, evento.file + 1):
@@ -3172,43 +3187,79 @@ def _genera_pdf_evento(evento):
 
     c.showPage()
 
-    # Pagina 2: elenco prenotazioni e foglio presenze
-    c.setFont('Helvetica-Bold', 16)
+    # Pagina 2: elenco prenotazioni e foglio presenze (caratteri grandi, leggibili a colpo d'occhio)
+    c.setFont('Helvetica-Bold', 20)
     c.drawString(15 * mm, height - 15 * mm, f"Elenco prenotazioni — {evento.nome}")
-    c.setFont('Helvetica', 9)
-    c.drawString(15 * mm, height - 21 * mm, f"{evento.sala.nome} — {evento.data_evento.strftime('%d/%m/%Y')} {evento.ora_inizio.strftime('%H:%M')} — {len(prenotazioni)} prenotazioni")
+    c.setFont('Helvetica', 12)
+    c.drawString(15 * mm, height - 22 * mm, f"{evento.sala.nome} — {evento.data_evento.strftime('%d/%m/%Y')} {evento.ora_inizio.strftime('%H:%M')} — {len(prenotazioni)} prenotazioni")
 
-    riga_h = 8 * mm
-    y = height - 32 * mm
+    font_riga = 13
+    leading = font_riga * 1.15
+    riga_min = 10 * mm
+    # colonne: (x, larghezza utile) in punti
+    col_nome = (36 * mm, 82 * mm)
+    col_contatto = (122 * mm, 82 * mm)
+    col_posti = (208 * mm, 130 * mm)
+    col_check = 342 * mm
 
     def intestazione_tabella(y_pos):
-        c.setFont('Helvetica-Bold', 9)
+        c.setFont('Helvetica-Bold', font_riga)
         c.drawString(15 * mm, y_pos, "Arrivo")
-        c.drawString(30 * mm, y_pos, "Nome")
-        c.drawString(110 * mm, y_pos, "Email / Cellulare")
-        c.drawString(200 * mm, y_pos, "Posti")
-        c.drawString(260 * mm, y_pos, "Check-in app")
-        c.line(15 * mm, y_pos - 2 * mm, width - 15 * mm, y_pos - 2 * mm)
-        return y_pos - riga_h
+        c.drawString(col_nome[0], y_pos, "Nome")
+        c.drawString(col_contatto[0], y_pos, "Email / Cellulare")
+        c.drawString(col_posti[0], y_pos, "Posti")
+        c.drawString(col_check, y_pos, "Check-in app")
+        c.setStrokeColor(colors.black)
+        c.line(15 * mm, y_pos - 2.5 * mm, width - 15 * mm, y_pos - 2.5 * mm)
+        return y_pos - 4 * mm   # bordo alto della prima riga
 
-    y = intestazione_tabella(y)
-    c.setFont('Helvetica', 9)
+    def testo_centrato(righe, x, y_top, riga_h):
+        """Scrive le righe centrate in verticale nella riga della tabella."""
+        blocco = len(righe) * leading
+        base = y_top - (riga_h - blocco) / 2 - font_riga * 0.85
+        for i, riga in enumerate(righe):
+            c.drawString(x, base - i * leading, riga)
+
+    y = intestazione_tabella(height - 33 * mm)
     for p in prenotazioni:
-        if y < 20 * mm:
-            c.showPage()
-            y = height - 20 * mm
-            y = intestazione_tabella(y)
-            c.setFont('Helvetica', 9)
-
-        nome_display = p.nome_prenotazione or p.utente.nome_cognome
+        nome_display = p.nome_prenotazione or p.utente.nome_cognome or ''
         contatto = p.utente.email or p.utente.cellulare or ''
-        posti_str = ', '.join(sorted(f"{s.fila}{s.colonna}" for s in p.posti))
+        posti_ord = sorted(p.posti, key=lambda s: (s.fila, s.colonna))
+        posti_str = ', '.join(f"{s.fila}{s.colonna}" for s in posti_ord)
 
-        c.rect(15 * mm, y - 4 * mm, 6 * mm, 6 * mm)
-        c.drawString(30 * mm, y, nome_display[:38])
-        c.drawString(110 * mm, y, contatto[:38])
-        c.drawString(200 * mm, y, posti_str[:35])
-        c.drawString(260 * mm, y, '✓ Presente' if p.presente else '')
+        r_nome = _pdf_righe_nome(nome_display, 'Helvetica', font_riga, col_nome[1], 2)
+        r_contatto = _pdf_righe_nome(contatto, 'Helvetica', font_riga, col_contatto[1], 1)
+        r_posti = _pdf_righe_nome(posti_str, 'Helvetica', font_riga, col_posti[1], 2)
+        n_righe = max(len(r_nome), len(r_contatto), len(r_posti), 1)
+        riga_h = max(riga_min, n_righe * leading + 3 * mm)
+
+        if y - riga_h < 15 * mm:
+            c.showPage()
+            y = intestazione_tabella(height - 20 * mm)
+
+        c.setFont('Helvetica', font_riga)
+        c.setStrokeColor(colors.black)
+        c.rect(15 * mm, y - riga_h / 2 - 3.5 * mm, 7 * mm, 7 * mm)
+        testo_centrato(r_nome, col_nome[0], y, riga_h)
+        testo_centrato(r_contatto, col_contatto[0], y, riga_h)
+        testo_centrato(r_posti, col_posti[0], y, riga_h)
+        if p.presente:
+            # segno di spunta disegnato a mano (Helvetica non ha il simbolo, e cosi' non dipende dai font)
+            base = y - (riga_h - leading) / 2 - font_riga * 0.85
+            c.setStrokeColor(colors.HexColor('#16a34a'))
+            c.setLineWidth(2)
+            tick = c.beginPath()
+            tick.moveTo(col_check, base + font_riga * 0.35)
+            tick.lineTo(col_check + 1.8 * mm, base + font_riga * 0.05)
+            tick.lineTo(col_check + 5 * mm, base + font_riga * 0.75)
+            c.drawPath(tick, stroke=1, fill=0)
+            c.setLineWidth(1)
+            c.setStrokeColor(colors.black)
+            c.setFont('Helvetica', font_riga)
+            c.drawString(col_check + 7 * mm, base, 'Presente')
+
+        c.setStrokeColor(colors.lightgrey)
+        c.line(15 * mm, y - riga_h, width - 15 * mm, y - riga_h)
         y -= riga_h
 
     c.save()

@@ -1260,8 +1260,8 @@ source venv/bin/activate    (Linux/Mac)</pre>
     <h3>Stampa PDF per l'ingresso</h3>
     <p>Il pulsante <strong>🖨️ Stampa PDF</strong> in alto genera un PDF in formato A3 orizzontale, pensato per essere stampato e usato come riferimento cartaceo il giorno dell'evento:</p>
     <ul>
-        <li><strong>Pagina 1 — Mappa posti:</strong> l'intera pianta della sala con il riferimento di ogni posto (es. B7) in grassetto e a caratteri grandi; sui posti occupati compare anche il nome della prenotazione, su due righe (se non entra tutto viene abbreviato con "..."). La grandezza dei caratteri si adatta al numero di file e colonne della sala</li>
-        <li><strong>Pagina 2 — Elenco prenotazioni:</strong> nome, contatto e posti di ogni prenotazione, con una casella vuota da barrare a penna e una colonna che mostra se il check-in è già stato fatto dall'app</li>
+        <li><strong>Pagina 1 — Mappa posti:</strong> l'intera pianta della sala con il riferimento di ogni posto (es. B7) in grassetto e a caratteri grandi; sui posti occupati compare anche il nome della prenotazione, su due righe. La pianta riempie la pagina A3 e la grandezza dei caratteri si adatta al numero di file e colonne della sala: con una sala di circa 12 × 12 il nome è a 13 pt; il carattere si riduce solo se un cognome lungo non entra nella cella, e solo con file molto numerose il nome può essere abbreviato con "..."</li>
+        <li><strong>Pagina 2 — Elenco prenotazioni:</strong> nome, contatto e posti di ogni prenotazione, a caratteri grandi (13 pt), con una casella vuota da barrare a penna e una colonna che mostra con una spunta verde se il check-in è già stato fatto dall'app. I posti sono in ordine naturale (D9, D10, D11) e i nomi o gli elenchi di posti molto lunghi vanno a capo su due righe. Se le prenotazioni non stanno in una pagina, l'elenco continua sulle pagine successive con l'intestazione ripetuta</li>
     </ul>
     <p>Si apre in una nuova scheda del browser, pronta per la stampa (Ctrl+P / Cmd+P) o il salvataggio come file.</p>
 
@@ -1931,7 +1931,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
         <li><strong>Nuovo:</strong> Prenotare un Posto (2.4) e Gestione Prenotazioni (3.10) — modifica del nome di una prenotazione gia' inserita: doppio click sul posto o pulsante "✏️ Modifica nome", con finestra dedicata: il nome cambia solo sul posto scelto (se la prenotazione ne comprende altri, il posto viene separato in una prenotazione a parte), oppure, con la spunta, su tutte le prenotazioni dell'evento con lo stesso nome (nuova API <code>POST /api/prenotazione/&lt;id&gt;/rinomina</code>)</li>
         <li><strong>Sicurezza:</strong> i nomi delle prenotazioni mostrati sulla mappa posti vengono ora "escapati" (prevenzione XSS)</li>
         <li><strong>Nuovo:</strong> Gestione Evento (3.10) — l'elenco prenotazioni ha la colonna "Nome prenotazione", i dettagli mostrano il nome e il layout scrive il nome per intero (su piu' righe) invece di tagliarlo a 6 caratteri</li>
-        <li><strong>Nuovo:</strong> Stampa PDF (3.10) — nella pianta il riferimento del posto e' piu' grande e il nome della prenotazione va su due righe invece di essere tagliato a 16 caratteri</li>
+        <li><strong>Nuovo:</strong> Stampa PDF (3.10) — nella pianta il riferimento del posto e' piu' grande e il nome della prenotazione (fino a 13 pt) va su due righe invece di essere tagliato a 16 caratteri; l'elenco della pagina 2 passa da 9 a 13 pt, con posti in ordine naturale e spunta verde per i check-in gia' fatti</li>
         <li><strong>Correzione:</strong> le pagine non vengono piu' servite dalla cache del browser (service worker v1.6), cosi' le modifiche ai nomi compaiono subito</li>
     </ul>
 
