@@ -11,6 +11,14 @@
     </div>
     {% endif %}
 
+    {% if redirect_uri_config %}
+    <div class="alert {{ 'alert-warning' if redirect_uri_avviso else 'alert-info' }}">
+        <strong>URI di reindirizzamento OAuth</strong> (<code>GOOGLE_REDIRECT_URI</code>): <code>{{ redirect_uri_config }}</code><br>
+        {% if redirect_uri_avviso %}⚠️ {{ redirect_uri_avviso }}<br>{% endif %}
+        <small>Deve essere identico, carattere per carattere, a uno degli «URI di reindirizzamento autorizzati» del client OAuth su Google Cloud Console. Serve solo quando colleghi l'account: non influisce sul test della connessione.</small>
+    </div>
+    {% endif %}
+
     {% if connessione %}
     <div class="form-card">
         <h3>✅ Account collegato</h3>

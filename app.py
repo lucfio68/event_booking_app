@@ -25,10 +25,12 @@ import requests as http_requests
 from cryptography.fernet import Fernet, InvalidToken
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
+from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build as google_build
 from googleapiclient.errors import HttpError as GoogleHttpError
 
-from reportlab.lib.pagesizes import A3, landscape
+from urllib.parse import urlparse
+from reportlab.lib.pagesizes import A3, A4, landscape, portrait
 from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas as pdfcanvas
@@ -2430,7 +2432,35 @@ FUSO_ORARIO_APP = ZoneInfo('Europe/Rome')
 
 def _google_configurato():
     return bool(app.config.get('GOOGLE_CLIENT_ID') and app.config.get('GOOGLE_CLIENT_SECRET')
-                and app.config.get('GOOGLE_REDIRECT_URI') and app.config.get('TOKEN_ENCRYPTION_KEY'))
+                and _google_redirect_uri() and app.config.get('TOKEN_ENCRYPTION_KEY'))
+
+
+def _google_redirect_uri():
+    """GOOGLE_REDIRECT_URI senza spazi/tab iniziali o finali (un incolla dalla tabella delle variabili
+    d'ambiente puo' portarsi dietro un carattere invisibile e il valore non coinciderebbe piu' con Google)."""
+    return (app.config.get('GOOGLE_REDIRECT_URI') or '').strip()
+
+
+def _diagnosi_redirect_uri():
+    """Segnala incoerenze evidenti nell'URI di reindirizzamento. Ritorna (valore, avviso o None)."""
+    grezzo = app.config.get('GOOGLE_REDIRECT_URI') or ''
+    uri = grezzo.strip()
+    if not uri:
+        return '', None
+    avvisi = []
+    if grezzo != uri:
+        avvisi.append("Il valore salvato contiene spazi o tabulazioni all'inizio o alla fine: l'app li ignora, "
+                      "ma conviene correggere la variabile d'ambiente.")
+    parti = urlparse(uri)
+    if parti.netloc and parti.netloc != request.host:
+        avvisi.append(f"L'indirizzo dell'URI ({parti.netloc}) è diverso da quello da cui stai usando l'app "
+                      f"({request.host}): dopo il consenso Google ti riporterebbe su un altro sito e il collegamento "
+                      f"non si completerebbe. Su ogni servizio la variabile deve puntare al proprio indirizzo.")
+    if parti.path != '/admin/google/callback':
+        avvisi.append("Il percorso dovrebbe essere /admin/google/callback.")
+    if request.is_secure and parti.scheme != 'https':
+        avvisi.append("L'URI dovrebbe iniziare con https://.")
+    return uri, (' '.join(avvisi) if avvisi else None)
 
 
 def _google_client_config():
@@ -2440,7 +2470,7 @@ def _google_client_config():
             "client_secret": app.config['GOOGLE_CLIENT_SECRET'],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [app.config['GOOGLE_REDIRECT_URI']],
+            "redirect_uris": [_google_redirect_uri()],
         }
     }
 
@@ -2476,6 +2506,19 @@ def _credenziali_google(connessione):
     )
 
 
+def _errore_google_leggibile(e, contesto):
+    """Traduce in italiano l'errore piu' comune: refresh token scaduto o revocato (invalid_grant)."""
+    if isinstance(e, RefreshError) or 'invalid_grant' in str(e):
+        return (
+            "L'autorizzazione di Google non è più valida: è scaduta, è stata revocata, oppure è stata rilasciata "
+            "a un client OAuth diverso da quello configurato ora (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET). "
+            "Nella pagina Google Calendar scollega l'account e ricollegalo (Scollega, poi Collega Account Google). "
+            "Se capita di nuovo dopo circa una settimana, la schermata di consenso OAuth del progetto "
+            "Google è ancora in modalità \"Test\" e va pubblicata (\"In produzione\")."
+        )
+    return f"{contesto}: {e}"
+
+
 def _elenca_calendari_google():
     connessione = _connessione_google_attiva()
     if not connessione:
@@ -2490,7 +2533,7 @@ def _elenca_calendari_google():
     except GoogleHttpError as e:
         return None, f"Errore dall'API Google: {e}"
     except Exception as e:
-        return None, f"Errore durante il recupero dei calendari: {e}"
+        return None, _errore_google_leggibile(e, "Errore durante il recupero dei calendari")
 
 
 @app.route('/admin/google')
@@ -2521,12 +2564,14 @@ def admin_google_status():
         except GoogleHttpError as e:
             errore_calendari = f"Errore dall'API Google: {e}"
         except Exception as e:
-            errore_calendari = f"Errore durante il test: {e}"
+            errore_calendari = _errore_google_leggibile(e, "Errore durante il test")
 
+    redirect_uri_config, redirect_uri_avviso = _diagnosi_redirect_uri()
     return render_template(
         'admin_google.html',
         connessione=connessione, calendari=calendari, errore_calendari=errore_calendari,
-        google_configurato=_google_configurato()
+        google_configurato=_google_configurato(),
+        redirect_uri_config=redirect_uri_config, redirect_uri_avviso=redirect_uri_avviso
     )
 
 
@@ -2541,7 +2586,7 @@ def admin_google_connect():
 
     flow = Flow.from_client_config(
         _google_client_config(), scopes=GOOGLE_SCOPES,
-        redirect_uri=app.config['GOOGLE_REDIRECT_URI']
+        redirect_uri=_google_redirect_uri()
     )
     authorization_url, state = flow.authorization_url(
         access_type='offline',
@@ -2571,7 +2616,7 @@ def admin_google_callback():
     try:
         flow = Flow.from_client_config(
             _google_client_config(), scopes=GOOGLE_SCOPES,
-            redirect_uri=app.config['GOOGLE_REDIRECT_URI']
+            redirect_uri=_google_redirect_uri()
         )
         flow.fetch_token(authorization_response=request.url)
         creds = flow.credentials
@@ -2917,7 +2962,7 @@ def admin_google_import():
         except GoogleHttpError as e:
             errore_import = f"Errore dall'API Google: {e}"
         except Exception as e:
-            errore_import = f"Errore durante il recupero degli eventi: {e}"
+            errore_import = _errore_google_leggibile(e, "Errore durante il recupero degli eventi")
 
     return render_template(
         'admin_google_import.html',
@@ -3048,7 +3093,7 @@ def admin_google_import_applica():
 
 
 # ==============================================================================
-# 10. GENERAZIONE DOCUMENTALE PDF (REPORTLAB A3)
+# 10. GENERAZIONE DOCUMENTALE PDF (REPORTLAB: A4 orizzontale per la pianta, A4 verticale per l'elenco)
 # ==============================================================================
 
 def _parse_corridoi_pdf(valore):
@@ -3122,6 +3167,133 @@ def _pdf_disegna_posto(c, x, y, cella_w, cella_h, riferimento, occupato, nome):
         c.drawString(x + pad, y - cella_h + 1.2 * mm + nome_font * 0.2 + i * leading, riga)
 
 
+def _pdf_elenco_a4(c, evento, prenotazioni):
+    """Elenco prenotazioni su A4 verticale, in due colonne (Arrivo | Nome | Posti).
+    Sceglie il carattere piu' grande che permette di stare in UNA sola pagina (da 16 a 8 pt);
+    solo se nemmeno a 8 pt basta, continua su pagine successive."""
+    pw, ph = portrait(A4)
+    c.setPageSize((pw, ph))
+    marg = 10 * mm
+    gap_col = 8 * mm
+    col_w = (pw - 2 * marg - gap_col) / 2
+    bottom = 10 * mm
+    top_corpo = ph - 26 * mm
+
+    voci = []
+    for p in prenotazioni:
+        nome = p.nome_prenotazione or p.utente.nome_cognome or ''
+        posti_ord = sorted(p.posti, key=lambda s: (s.fila, s.colonna))
+        voci.append((nome, ', '.join(f"{s.fila}{s.colonna}" for s in posti_ord), bool(p.presente)))
+    voci.sort(key=lambda v: v[0].casefold())
+
+    titolo = f"Elenco prenotazioni — {evento.nome}"
+    tf = 16
+    while tf > 11 and stringWidth(titolo, 'Helvetica-Bold', tf) > pw - 2 * marg:
+        tf -= 0.5
+    sottotitolo = (f"{evento.sala.nome} — {evento.data_evento.strftime('%d/%m/%Y')} "
+                   f"{evento.ora_inizio.strftime('%H:%M')} — {len(voci)} prenotazioni")
+
+    def geometria(f):
+        box = f * 0.9
+        hf = f * 0.62                      # carattere delle intestazioni di colonna
+        sp = f * 0.5
+        col_arrivo = max(box, stringWidth('Arrivo', 'Helvetica-Bold', hf)) + sp
+        utile = col_w - col_arrivo - sp
+        return box, hf, sp, col_arrivo, utile * 0.46, utile * 0.54
+
+    def costruisci_righe(f):
+        box, hf, sp, col_arrivo, w_nome, w_posti = geometria(f)
+        righe = []
+        for nome, posti_str, presente in voci:
+            fn = f
+            parole = nome.split()
+            # un cognome lungo riduce un po' il carattere di quella riga, senza spezzarsi a meta'
+            while parole and fn > f * 0.7 and max(stringWidth(w, 'Helvetica', fn) for w in parole) > w_nome:
+                fn -= 0.25
+            r_nome = _pdf_righe_nome(nome, 'Helvetica', fn, w_nome, 3)
+            r_posti = _pdf_righe_nome(posti_str, 'Helvetica', f, w_posti, 6)
+            h = max(f * 1.9, len(r_nome) * fn * 1.15 + 5, len(r_posti) * f * 1.15 + 5)
+            righe.append({'r_nome': r_nome, 'fn': fn, 'r_posti': r_posti, 'presente': presente, 'h': h})
+        return righe
+
+    def impagina(righe, f):
+        disponibile = top_corpo - bottom - f * 1.9
+        pagine = [[[]]]                    # pagine -> colonne -> righe
+        usato = 0
+        for r in righe:
+            if usato + r['h'] > disponibile and pagine[-1][-1]:
+                if len(pagine[-1]) == 1:
+                    pagine[-1].append([])
+                else:
+                    pagine.append([[]])
+                usato = 0
+            pagine[-1][-1].append(r)
+            usato += r['h']
+        return pagine
+
+    f = 16.0
+    while True:
+        righe = costruisci_righe(f)
+        pagine = impagina(righe, f)
+        if len(pagine) == 1 or f <= 8.0:
+            break
+        f -= 0.5
+
+    box, hf, sp, col_arrivo, w_nome, w_posti = geometria(f)
+    hh = f * 1.9
+    for i, pagina in enumerate(pagine):
+        if i > 0:
+            c.showPage()
+            c.setPageSize((pw, ph))
+        c.setFillColor(colors.black)
+        c.setFont('Helvetica-Bold', tf)
+        c.drawString(marg, ph - 12 * mm, titolo)
+        c.setFont('Helvetica', 10)
+        c.drawString(marg, ph - 18 * mm, sottotitolo)
+        for ci, colonna in enumerate(pagina):
+            x0 = marg + ci * (col_w + gap_col)
+            c.setFont('Helvetica-Bold', hf)
+            base_h = top_corpo - hh * 0.65
+            c.drawString(x0, base_h, "Arrivo")
+            c.drawString(x0 + col_arrivo, base_h, "Nome")
+            c.drawString(x0 + col_arrivo + w_nome + sp, base_h, "Posti")
+            c.setStrokeColor(colors.black)
+            c.setLineWidth(1)
+            c.line(x0, top_corpo - hh, x0 + col_w, top_corpo - hh)
+            y = top_corpo - hh
+            for r in colonna:
+                h = r['h']
+                c.setStrokeColor(colors.black)
+                c.setLineWidth(1)
+                bx, by = x0, y - h / 2 - box / 2
+                c.rect(bx, by, box, box)
+                if r['presente']:
+                    # check-in gia' fatto dall'app: casella con la spunta verde
+                    c.setStrokeColor(colors.HexColor('#16a34a'))
+                    c.setLineWidth(max(1.5, box * 0.2))
+                    tick = c.beginPath()
+                    tick.moveTo(bx + box * 0.18, by + box * 0.52)
+                    tick.lineTo(bx + box * 0.42, by + box * 0.24)
+                    tick.lineTo(bx + box * 0.84, by + box * 0.80)
+                    c.drawPath(tick, stroke=1, fill=0)
+                    c.setLineWidth(1)
+                c.setFillColor(colors.black)
+                fn = r['fn']
+                c.setFont('Helvetica', fn)
+                blocco = len(r['r_nome']) * fn * 1.15
+                base = y - (h - blocco) / 2 - fn * 0.85
+                for k, riga in enumerate(r['r_nome']):
+                    c.drawString(x0 + col_arrivo, base - k * fn * 1.15, riga)
+                c.setFont('Helvetica', f)
+                blocco = len(r['r_posti']) * f * 1.15
+                base = y - (h - blocco) / 2 - f * 0.85
+                for k, riga in enumerate(r['r_posti']):
+                    c.drawString(x0 + col_arrivo + w_nome + sp, base - k * f * 1.15, riga)
+                c.setStrokeColor(colors.lightgrey)
+                c.line(x0, y - h, x0 + col_w, y - h)
+                y -= h
+
+
 def _genera_pdf_evento(evento):
     posti = (
         Posto.query.filter_by(evento_id=evento.id)
@@ -3141,29 +3313,33 @@ def _genera_pdf_evento(evento):
     corr_file = _parse_corridoi_pdf(evento.corridoio_file)
 
     buffer = io.BytesIO()
-    page_size = landscape(A3)
+    page_size = landscape(A4)
     width, height = page_size
     c = pdfcanvas.Canvas(buffer, pagesize=page_size)
 
-    # Pagina 1: mappa posti
-    c.setFont('Helvetica-Bold', 18)
-    c.drawString(15 * mm, height - 15 * mm, evento.nome)
-    c.setFont('Helvetica', 11)
+    # Pagina 1: mappa posti (A4 orizzontale)
+    titolo = evento.nome
+    tf = 16
+    while tf > 11 and stringWidth(titolo, 'Helvetica-Bold', tf) > width - 20 * mm:
+        tf -= 0.5
+    c.setFont('Helvetica-Bold', tf)
+    c.drawString(10 * mm, height - 11 * mm, titolo)
+    c.setFont('Helvetica', 10)
     intestazione = f"{evento.sala.nome} — {evento.data_evento.strftime('%d/%m/%Y')} {evento.ora_inizio.strftime('%H:%M')}"
     if evento.gestore:
         intestazione += f" — {evento.gestore.ragione_sociale}"
-    c.drawString(15 * mm, height - 22 * mm, intestazione)
-    c.setFont('Helvetica', 8)
-    c.drawString(15 * mm, height - 27 * mm, f"Stampato il {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    c.drawString(10 * mm, height - 17 * mm, intestazione)
+    c.setFont('Helvetica', 7)
+    c.drawString(10 * mm, height - 21 * mm, f"Stampato il {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
-    margine_sx = 15 * mm
-    margine_top = 35 * mm
+    margine_sx = 10 * mm
+    margine_top = 25 * mm
     area_larghezza = width - 2 * margine_sx
-    area_altezza = height - margine_top - 15 * mm
+    area_altezza = height - margine_top - 8 * mm
 
-    colonne_visive = evento.colonne + len(corr_col)
-    file_visive = evento.file + len(corr_file)
-    # tetti alti: con una sala tipica (~12x12) la pianta riempie la pagina A3 e i caratteri restano grandi
+    # i corridoi occupano il 40% di una cella (vedi sotto): cosi' la pianta riempie davvero la pagina
+    colonne_visive = evento.colonne + 0.4 * len(corr_col)
+    file_visive = evento.file + 0.4 * len(corr_file)
     cella_w = min(34 * mm, area_larghezza / max(colonne_visive, 1))
     cella_h = min(22 * mm, area_altezza / max(file_visive, 1))
 
@@ -3187,80 +3363,8 @@ def _genera_pdf_evento(evento):
 
     c.showPage()
 
-    # Pagina 2: elenco prenotazioni e foglio presenze (caratteri grandi, leggibili a colpo d'occhio)
-    c.setFont('Helvetica-Bold', 20)
-    c.drawString(15 * mm, height - 15 * mm, f"Elenco prenotazioni — {evento.nome}")
-    c.setFont('Helvetica', 12)
-    c.drawString(15 * mm, height - 22 * mm, f"{evento.sala.nome} — {evento.data_evento.strftime('%d/%m/%Y')} {evento.ora_inizio.strftime('%H:%M')} — {len(prenotazioni)} prenotazioni")
-
-    font_riga = 13
-    leading = font_riga * 1.15
-    riga_min = 10 * mm
-    # colonne: (x, larghezza utile) in punti
-    col_nome = (36 * mm, 82 * mm)
-    col_contatto = (122 * mm, 82 * mm)
-    col_posti = (208 * mm, 130 * mm)
-    col_check = 342 * mm
-
-    def intestazione_tabella(y_pos):
-        c.setFont('Helvetica-Bold', font_riga)
-        c.drawString(15 * mm, y_pos, "Arrivo")
-        c.drawString(col_nome[0], y_pos, "Nome")
-        c.drawString(col_contatto[0], y_pos, "Email / Cellulare")
-        c.drawString(col_posti[0], y_pos, "Posti")
-        c.drawString(col_check, y_pos, "Check-in app")
-        c.setStrokeColor(colors.black)
-        c.line(15 * mm, y_pos - 2.5 * mm, width - 15 * mm, y_pos - 2.5 * mm)
-        return y_pos - 4 * mm   # bordo alto della prima riga
-
-    def testo_centrato(righe, x, y_top, riga_h):
-        """Scrive le righe centrate in verticale nella riga della tabella."""
-        blocco = len(righe) * leading
-        base = y_top - (riga_h - blocco) / 2 - font_riga * 0.85
-        for i, riga in enumerate(righe):
-            c.drawString(x, base - i * leading, riga)
-
-    y = intestazione_tabella(height - 33 * mm)
-    for p in prenotazioni:
-        nome_display = p.nome_prenotazione or p.utente.nome_cognome or ''
-        contatto = p.utente.email or p.utente.cellulare or ''
-        posti_ord = sorted(p.posti, key=lambda s: (s.fila, s.colonna))
-        posti_str = ', '.join(f"{s.fila}{s.colonna}" for s in posti_ord)
-
-        r_nome = _pdf_righe_nome(nome_display, 'Helvetica', font_riga, col_nome[1], 2)
-        r_contatto = _pdf_righe_nome(contatto, 'Helvetica', font_riga, col_contatto[1], 1)
-        r_posti = _pdf_righe_nome(posti_str, 'Helvetica', font_riga, col_posti[1], 2)
-        n_righe = max(len(r_nome), len(r_contatto), len(r_posti), 1)
-        riga_h = max(riga_min, n_righe * leading + 3 * mm)
-
-        if y - riga_h < 15 * mm:
-            c.showPage()
-            y = intestazione_tabella(height - 20 * mm)
-
-        c.setFont('Helvetica', font_riga)
-        c.setStrokeColor(colors.black)
-        c.rect(15 * mm, y - riga_h / 2 - 3.5 * mm, 7 * mm, 7 * mm)
-        testo_centrato(r_nome, col_nome[0], y, riga_h)
-        testo_centrato(r_contatto, col_contatto[0], y, riga_h)
-        testo_centrato(r_posti, col_posti[0], y, riga_h)
-        if p.presente:
-            # segno di spunta disegnato a mano (Helvetica non ha il simbolo, e cosi' non dipende dai font)
-            base = y - (riga_h - leading) / 2 - font_riga * 0.85
-            c.setStrokeColor(colors.HexColor('#16a34a'))
-            c.setLineWidth(2)
-            tick = c.beginPath()
-            tick.moveTo(col_check, base + font_riga * 0.35)
-            tick.lineTo(col_check + 1.8 * mm, base + font_riga * 0.05)
-            tick.lineTo(col_check + 5 * mm, base + font_riga * 0.75)
-            c.drawPath(tick, stroke=1, fill=0)
-            c.setLineWidth(1)
-            c.setStrokeColor(colors.black)
-            c.setFont('Helvetica', font_riga)
-            c.drawString(col_check + 7 * mm, base, 'Presente')
-
-        c.setStrokeColor(colors.lightgrey)
-        c.line(15 * mm, y - riga_h, width - 15 * mm, y - riga_h)
-        y -= riga_h
+    # Pagina 2: elenco prenotazioni (A4 verticale, due colonne)
+    _pdf_elenco_a4(c, evento, prenotazioni)
 
     c.save()
     buffer.seek(0)
