@@ -1,19 +1,4 @@
-ile	Ruolo	Ultima modifica
-app.py	Route Flask, logica applicativa	CRUD Sale/Generi/Layout, migrazione
-models.py	Schema SQLAlchemy	GenereEvento, LayoutPosti, overbooking
-config.py	Configurazione/env vars	MIGRATION_SECRET
-base.html	Template padre (navbar, PWA meta)	Nav Calendario, color-scheme, SW path
-admin_sale.html	CRUD Sale	Nuovo
-admin_generi.html	CRUD Generi Evento	Nuovo
-admin_layout_posti.html	CRUD Layout Posti	Nuovo
-admin_view.html	Vista "Gestisci" evento	Fix nome prenotazione
-style.css	Stili globali	Fix responsive/dark-mode/calendario
-manifest.json	Config PWA	Fix splash screen
-static/js/service-worker.js	Service Worker PWA	Spostato, v1.4, precache ridotto
-migrate_layout_posti.py	Script migrazione offline (alternativa alla route)	Allineato con la route
-guida_event_booking.html	Guida utente/admin	v1.5
-booking.html, booking.js, calendar.html, calendar.js, admin.js, main.js	Flusso prenotazione/calendario	Non ancora toccati dalla Fase A/B
-event_create.html	Form creazione evento	Non ancora toccato — prossimo (Step 4)
+		Form creazione evento	Non ancora toccato — prossimo (Step 4)
 
 Se in una nuova conversazione riprendi da qui, questi sono i file minimi da ricaricarmi per continuare senza perdere contesto: tutti quelli sopra, più eventualmente event_create.html se non l'hai ancora condiviso nella sua ultima versione.
 
