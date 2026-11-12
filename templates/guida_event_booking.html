@@ -291,7 +291,7 @@
 <header>
     <h1>📖 Guida EventBooking</h1>
     <p>Manuale completo per utenti e amministratori</p>
-    <span class="version-badge">v2.3</span>
+    <span class="version-badge">v2.4</span>
     {% if current_user.is_authenticated and not current_user.is_admin() %}
     <p style="margin-top:8px; font-size:0.85em; opacity:0.8;">Stai visualizzando la guida in versione <strong>Utente</strong>. Le sezioni riservate agli amministratori sono nascoste.</p>
     {% endif %}
@@ -331,6 +331,7 @@
         <li><a href="#admin-google-sale">3.16 Google Calendar — Sale ↔ Calendari</a></li>
         <li><a href="#admin-google-import">3.17 Google Calendar — Import Eventi</a></li>
         <li><a href="#admin-gestori">3.18 Gestione Gestori</a></li>
+        <li><a href="#admin-stagioni">3.19 Gestione Stagioni</a></li>
         <li><a href="#schema">4. Schema Database</a></li>
         <li><a href="#faq-overbooking">4.1 Overbooking — come funziona</a></li>
         {% endif %}
@@ -1647,6 +1648,46 @@ source venv/bin/activate    (Linux/Mac)</pre>
     <p><strong>Dove si usa un Gestore:</strong> assegnalo come <a href="#admin-sale">Gestore di default di una Sala</a> (proposto automaticamente, sempre cambiabile) e ai <a href="#admin-generi">Generi Evento</a> di sua competenza — insieme determinano cosa vedi nel modulo di <a href="#admin-eventi">Creazione Evento</a>.</p>
 </div>
 
+<div class="section" id="admin-stagioni">
+    <h2><span class="badge badge-admin">Admin</span> 3.19 Gestione Stagioni</h2>
+    <p>Una <strong>Stagione</strong> è un periodo (per esempio «Prosa 2026/27») che appartiene a un <a href="#admin-gestori">Gestore</a>: ha un nome, una descrizione facoltativa, una data di inizio e una di fine. Le stagioni serviranno per la Gestione Abbonati, per abbinare in automatico gli abbonati agli eventi del Gestore che cadono nel periodo. Si gestiscono dalla voce <strong>📆 Stagioni</strong> del menu in alto.</p>
+
+    <h3>Creare una Stagione</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Compila i dati</h4>
+            <p>Sono obbligatori <strong>Nome stagione</strong>, <strong>Gestore</strong>, <strong>Data inizio</strong> e <strong>Data fine</strong>; la <strong>Descrizione</strong> è facoltativa. Per creare una stagione serve almeno un Gestore (vedi <a href="#admin-gestori">3.18</a>).</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Controlla le date</h4>
+            <p>La data di fine non può precedere quella di inizio (può coincidere). Lo stesso Gestore non può avere due stagioni con lo stesso nome (maiuscole e minuscole non contano).</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Premi «Crea Stagione»</h4>
+            <p>La stagione compare nell'elenco, che resta filtrato sul Gestore appena scelto.</p>
+        </div>
+    </div>
+
+    <h3>L'elenco delle stagioni</h3>
+    <p>Per ogni stagione vedi il Gestore, il periodo e lo <strong>stato</strong>: <em>Futura</em>, <em>In corso</em> oppure <em>Conclusa</em>, in base alla data di oggi. La colonna <strong>Eventi nel periodo</strong> conta gli eventi di quel Gestore con data compresa tra inizio e fine: è solo un'informazione di controllo. Con il filtro <strong>Filtra per gestore</strong> puoi vedere le stagioni di un solo Gestore.</p>
+
+    <h3>Modificare ed eliminare</h3>
+    <p>Con <strong>Modifica</strong> il modulo in alto si riempie con i dati della stagione: cambia ciò che serve e premi <strong>Salva Modifiche</strong> (<strong>Annulla</strong> per tornare indietro). Con <strong>Elimina</strong> e la conferma la stagione viene rimossa.</p>
+    <div class="alert alert-info">
+        <strong>Sovrapposizioni:</strong> lo stesso Gestore può avere più stagioni nello stesso periodo (per esempio una di prosa e una di danza): non c'è alcun controllo di sovrapposizione.
+    </div>
+    <div class="alert alert-warning">
+        <strong>Cosa succede agli eventi:</strong> creare, modificare o eliminare una stagione non cambia gli eventi già esistenti. Un <strong>Gestore</strong> che ha delle stagioni collegate non può essere eliminato finché non elimini prima le sue stagioni.
+    </div>
+</div>
+
 <div class="section" id="schema">
     <h2>🗄️ 4. Schema Database</h2>
     <p>L'applicazione utilizza PostgreSQL (Neon) con il seguente schema relazionale:</p>
@@ -1680,6 +1721,21 @@ source venv/bin/activate    (Linux/Mac)</pre>
 │ logo            │ BYTEA       │ No       │ Blob immagine                │
 │ logo_mimetype   │ VARCHAR(50) │ No       │ es. image/png                │
 │ creato_da       │ INTEGER FK  │ No       │ -> utente.id                 │
+│ data_creazione  │ DATETIME    │ No       │ Auto                        │
+└─────────────────┴─────────────┴──────────┴─────────────────────────────┘
+    </div>
+    <h3>Tabella <code>stagione</code> <span style="font-weight:normal; font-size:0.8em;">(Gestione Stagione)</span></h3>
+    <div class="schema-box">
+┌─────────────────┬─────────────┬──────────┬─────────────────────────────┐
+│ Campo           │ Tipo        │ Obblig.  │ Note                        │
+├─────────────────┼─────────────┼──────────┼─────────────────────────────┤
+│ id              │ INTEGER PK  │ Sì       │ Auto-increment              │
+│ nome_stagione   │ VARCHAR(150)│ Sì       │ Nome della stagione         │
+│ descrizione     │ TEXT        │ No       │                             │
+│ gestore_id      │ INTEGER FK  │ Sì       │ -> gestore.id               │
+│ data_inizio     │ DATE        │ Sì       │ Primo giorno                │
+│ data_fine       │ DATE        │ Sì       │ Ultimo giorno               │
+│ creato_da       │ INTEGER FK  │ No       │ -> utente.id                │
 │ data_creazione  │ DATETIME    │ No       │ Auto                        │
 └─────────────────┴─────────────┴──────────┴─────────────────────────────┘
     </div>
@@ -1834,6 +1890,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
         <li><code>gestore</code> -> <code>genere_evento</code> (1:N, opzionale, Fase C)</li>
         <li><code>gestore</code> -> <code>sala</code> (1:N come default, opzionale, Fase C)</li>
         <li><code>gestore</code> -> <code>evento</code> (1:N, opzionale, Fase C)</li>
+        <li><code>gestore</code> -> <code>stagione</code> (1:N, Gestione Stagione)</li>
     </ul>
 </div>
 
@@ -1931,6 +1988,11 @@ source venv/bin/activate    (Linux/Mac)</pre>
 {% if current_user.is_admin() %}
 <div class="section" id="changelog">
     <h2>📝 6. Changelog</h2>
+
+    <h3>v2.4 (2026)</h3>
+    <ul>
+        <li><strong>Nuovo:</strong> Gestione Stagioni (3.19) — anagrafica delle stagioni (nome, descrizione, gestore, data inizio e fine) con elenco filtrabile per gestore, stato (futura / in corso / conclusa) e numero di eventi del gestore nel periodo; nuova voce di menu "Stagioni" e nuova tabella <code>stagione</code> (4. Schema Database). Un gestore con stagioni collegate non puo' essere eliminato</li>
+    </ul>
 
     <h3>v2.3 (2026)</h3>
     <ul>

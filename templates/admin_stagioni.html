@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Gestione Stagioni{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <h2>📆 Gestione Stagioni</h2>
+    <p class="text-muted">Una Stagione è un periodo (es. «Prosa 2026/27») che appartiene a un Gestore. Servirà per abbinare in automatico gli abbonati agli eventi di quel Gestore che cadono nel periodo.</p>
+
+    {% if not gestori %}
+    <div class="alert alert-warning">
+        Per creare una stagione serve almeno un Gestore. <a href="{{ url_for('admin_gestori') }}">Vai a Gestione Gestori</a>.
+    </div>
+    {% endif %}
+
+    <div class="form-card">
+        <h3>{{ 'Modifica Stagione "' ~ stagione_da_modificare.nome_stagione ~ '"' if stagione_da_modificare else 'Nuova Stagione' }}</h3>
+        <form method="POST"
+              action="{{ url_for('admin_stagioni_edit', stagione_id=stagione_da_modificare.id) if stagione_da_modificare else url_for('admin_stagioni_add') }}">
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Nome stagione *</label>
+                    <input type="text" name="nome_stagione" required maxlength="150" class="form-control"
+                           value="{{ stagione_da_modificare.nome_stagione if stagione_da_modificare else '' }}"
+                           placeholder="es. Prosa 2026/27">
+                </div>
+                <div class="form-group col-6">
+                    <label>Gestore *</label>
+                    <select name="gestore_id" required class="form-control">
+                        <option value="">-- Seleziona --</option>
+                        {% for g in gestori %}
+                        <option value="{{ g.id }}"
+                            {% if stagione_da_modificare and stagione_da_modificare.gestore_id == g.id %}selected
+                            {% elif not stagione_da_modificare and filtro_gestore_id == g.id %}selected{% endif %}>
+                            {{ g.ragione_sociale }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Data inizio *</label>
+                    <input type="date" name="data_inizio" id="data_inizio" required class="form-control"
+                           value="{{ stagione_da_modificare.data_inizio.strftime('%Y-%m-%d') if stagione_da_modificare else '' }}">
+                </div>
+                <div class="form-group col-6">
+                    <label>Data fine *</label>
+                    <input type="date" name="data_fine" id="data_fine" required class="form-control"
+                           value="{{ stagione_da_modificare.data_fine.strftime('%Y-%m-%d') if stagione_da_modificare else '' }}">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Descrizione <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(facoltativa)</span></label>
+                <textarea name="descrizione" rows="3" class="form-control"
+                          placeholder="es. Stagione di prosa, 8 spettacoli">{{ stagione_da_modificare.descrizione if stagione_da_modificare and stagione_da_modificare.descrizione else '' }}</textarea>
+            </div>
+
+            <button type="submit" class="btn btn-primary" {% if not gestori %}disabled{% endif %}>{{ 'Salva Modifiche' if stagione_da_modificare else 'Crea Stagione' }}</button>
+            {% if stagione_da_modificare %}
+            <a href="{{ url_for('admin_stagioni', gestore_id=filtro_gestore_id) if filtro_gestore_id else url_for('admin_stagioni') }}" class="btn btn-secondary">Annulla</a>
+            {% endif %}
+        </form>
+    </div>
+
+    <div class="prenotazioni-list">
+        <h3>Stagioni esistenti ({{ stagioni|length }})</h3>
+
+        <form method="GET" action="{{ url_for('admin_stagioni') }}" style="margin-bottom:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <label style="margin:0;">Filtra per gestore:</label>
+            <select name="gestore_id" class="form-control" style="width:auto;" onchange="this.form.submit()">
+                <option value="">Tutti</option>
+                {% for g in gestori %}
+                <option value="{{ g.id }}" {% if filtro_gestore_id == g.id %}selected{% endif %}>{{ g.ragione_sociale }}</option>
+                {% endfor %}
+            </select>
+        </form>
+
+        {% if stagioni %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Stagione</th>
+                    <th>Gestore</th>
+                    <th>Periodo</th>
+                    <th>Stato</th>
+                    <th>Eventi nel periodo</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in stagioni %}
+                <tr>
+                    <td>
+                        <strong>{{ s.nome_stagione }}</strong>
+                        {% if s.descrizione %}<br><span class="text-muted" style="font-size:0.85em;">{{ s.descrizione }}</span>{% endif %}
+                    </td>
+                    <td>{{ s.gestore.ragione_sociale }}</td>
+                    <td style="white-space:nowrap;">{{ s.data_inizio.strftime('%d/%m/%Y') }} – {{ s.data_fine.strftime('%d/%m/%Y') }}</td>
+                    <td>
+                        {% if oggi < s.data_inizio %}
+                        <span style="color:#2563eb; font-weight:600;">Futura</span>
+                        {% elif oggi > s.data_fine %}
+                        <span class="text-muted">Conclusa</span>
+                        {% else %}
+                        <span style="color:#16a34a; font-weight:600;">In corso</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ conteggi_eventi[s.id] }}</td>
+                    <td style="display:flex; gap:6px;">
+                        <a href="{{ url_for('admin_stagioni', modifica=s.id, gestore_id=filtro_gestore_id) if filtro_gestore_id else url_for('admin_stagioni', modifica=s.id) }}" class="btn btn-sm btn-secondary">Modifica</a>
+                        <form method="POST" action="{{ url_for('admin_stagioni_delete', stagione_id=s.id) }}" style="display:inline;" onsubmit="return confirm('Eliminare la stagione &quot;{{ s.nome_stagione }}&quot;? Gli eventi non vengono toccati.');">
+                            <button type="submit" class="btn btn-sm btn-danger">Elimina</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>{{ 'Nessuna stagione per il gestore selezionato.' if filtro_gestore_id else 'Nessuna stagione creata finora.' }}</p>
+        {% endif %}
+    </div>
+
+    <a href="{{ url_for('admin_gestori') }}" class="btn btn-outline">Vai a Gestione Gestori</a>
+    <a href="{{ url_for('calendar_view') }}" class="btn btn-outline">Torna al Calendario</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var inizio = document.getElementById('data_inizio');
+    var fine = document.getElementById('data_fine');
+    if (!inizio || !fine) return;
+    function allinea() { if (inizio.value) { fine.min = inizio.value; } }
+    inizio.addEventListener('change', allinea);
+    allinea();
+})();
+</script>
+{% endblock %}

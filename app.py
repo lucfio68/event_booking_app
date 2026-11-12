@@ -40,7 +40,7 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from models import (
     db, Utente, Sala, Evento, Prenotazione, Posto,
     GenereEvento, LayoutPosti, GoogleConnessione,
-    CalendarioGoogle, Gestore
+    CalendarioGoogle, Gestore, Stagione
 )
 from config import Config
 
@@ -1883,10 +1883,153 @@ def admin_gestori_delete(gestore_id):
     if not gestore:
         abort(404)
 
+    stagioni_collegate = Stagione.query.filter_by(gestore_id=gestore_id).count()
+    if stagioni_collegate > 0:
+        flash(
+            f"Impossibile eliminare '{gestore.ragione_sociale}': ha {stagioni_collegate} stagioni collegate. "
+            f"Elimina prima le stagioni.",
+            'danger'
+        )
+        return redirect(url_for('admin_gestori'))
+
     db.session.delete(gestore)
     db.session.commit()
     flash('Gestore eliminato.', 'success')
     return redirect(url_for('admin_gestori'))
+
+
+# ------------------------------------------------------------------------------
+# GESTIONE STAGIONE - Fase 1: anagrafica delle stagioni
+# ------------------------------------------------------------------------------
+
+def _leggi_stagione_da_form(escludi_id=None):
+    """Legge e valida il form di una Stagione. Ritorna (dati, errore): uno dei due e' None."""
+    nome = (request.form.get('nome_stagione') or '').strip()
+    descrizione = (request.form.get('descrizione') or '').strip() or None
+    gestore_id = request.form.get('gestore_id', type=int)
+
+    if not nome:
+        return None, 'Il nome della stagione è obbligatorio.'
+    if len(nome) > 150:
+        return None, 'Il nome della stagione è troppo lungo (massimo 150 caratteri).'
+    if not gestore_id or not db.session.get(Gestore, gestore_id):
+        return None, 'Seleziona un gestore valido.'
+
+    try:
+        data_inizio = datetime.strptime(request.form.get('data_inizio') or '', '%Y-%m-%d').date()
+        data_fine = datetime.strptime(request.form.get('data_fine') or '', '%Y-%m-%d').date()
+    except ValueError:
+        return None, 'Le date di inizio e fine sono obbligatorie e devono essere valide.'
+    if data_fine < data_inizio:
+        return None, 'La data di fine non può precedere la data di inizio.'
+
+    duplicata = Stagione.query.filter(
+        func.lower(Stagione.nome_stagione) == nome.lower(),
+        Stagione.gestore_id == gestore_id
+    )
+    if escludi_id:
+        duplicata = duplicata.filter(Stagione.id != escludi_id)
+    if duplicata.first():
+        return None, f"Esiste già una stagione chiamata '{nome}' per questo gestore."
+
+    return {
+        'nome_stagione': nome, 'descrizione': descrizione, 'gestore_id': gestore_id,
+        'data_inizio': data_inizio, 'data_fine': data_fine,
+    }, None
+
+
+@app.route('/admin/stagioni')
+@login_required
+def admin_stagioni():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
+    filtro_gestore_id = request.args.get('gestore_id', type=int)
+
+    query = Stagione.query.options(joinedload(Stagione.gestore))
+    if filtro_gestore_id:
+        query = query.filter(Stagione.gestore_id == filtro_gestore_id)
+    stagioni = query.order_by(Stagione.data_inizio.desc(), Stagione.nome_stagione).all()
+
+    # eventi del gestore che cadono nel periodo della stagione (solo informativo)
+    conteggi_eventi = {
+        s.id: Evento.query.filter(
+            Evento.gestore_id == s.gestore_id,
+            Evento.data_evento >= s.data_inizio,
+            Evento.data_evento <= s.data_fine
+        ).count()
+        for s in stagioni
+    }
+
+    modifica_id = request.args.get('modifica', type=int)
+    stagione_da_modificare = db.session.get(Stagione, modifica_id) if modifica_id else None
+
+    return render_template(
+        'admin_stagioni.html', stagioni=stagioni, gestori=gestori,
+        filtro_gestore_id=filtro_gestore_id, conteggi_eventi=conteggi_eventi,
+        stagione_da_modificare=stagione_da_modificare, oggi=date.today()
+    )
+
+
+@app.route('/admin/stagioni/add', methods=['POST'])
+@login_required
+def admin_stagioni_add():
+    if not current_user.is_admin():
+        abort(403)
+
+    dati, errore = _leggi_stagione_da_form()
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_stagioni'))
+
+    stagione = Stagione(creato_da=current_user.id, **dati)
+    db.session.add(stagione)
+    db.session.commit()
+    flash(f"Stagione '{stagione.nome_stagione}' creata.", 'success')
+    return redirect(url_for('admin_stagioni', gestore_id=stagione.gestore_id))
+
+
+@app.route('/admin/stagioni/<int:stagione_id>/edit', methods=['POST'])
+@login_required
+def admin_stagioni_edit(stagione_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    stagione = db.session.get(Stagione, stagione_id)
+    if not stagione:
+        abort(404)
+
+    dati, errore = _leggi_stagione_da_form(escludi_id=stagione_id)
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_stagioni', modifica=stagione_id))
+
+    for campo, valore in dati.items():
+        setattr(stagione, campo, valore)
+    db.session.commit()
+    flash(f"Stagione '{stagione.nome_stagione}' aggiornata.", 'success')
+    return redirect(url_for('admin_stagioni', gestore_id=stagione.gestore_id))
+
+
+@app.route('/admin/stagioni/<int:stagione_id>/delete', methods=['POST'])
+@login_required
+def admin_stagioni_delete(stagione_id):
+    if not current_user.is_admin():
+        abort(403)
+
+    stagione = db.session.get(Stagione, stagione_id)
+    if not stagione:
+        abort(404)
+
+    # Fase 2: qui si blocchera' l'eliminazione se esistono prenotazioni ripetitive collegate.
+
+    nome = stagione.nome_stagione
+    db.session.delete(stagione)
+    db.session.commit()
+    flash(f"Stagione '{nome}' eliminata.", 'success')
+    return redirect(url_for('admin_stagioni'))
 
 
 @app.route('/admin/generi')

@@ -71,6 +71,29 @@ class Gestore(db.Model):
     data_creazione = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class Stagione(db.Model):
+    """
+    Gestione Stagione - Fase 1: una stagione (es. "Prosa 2026/27") appartiene a un Gestore
+    e copre un periodo di date. Dalla Fase 2 le prenotazioni ripetitive (abbonati, ecc.)
+    saranno collegate a una stagione.
+    """
+    __tablename__ = 'stagione'
+    id = db.Column(db.Integer, primary_key=True)
+    nome_stagione = db.Column(db.String(150), nullable=False)
+    descrizione = db.Column(db.Text, nullable=True)
+    gestore_id = db.Column(db.Integer, db.ForeignKey('gestore.id'), nullable=False, index=True)
+    data_inizio = db.Column(db.Date, nullable=False)
+    data_fine = db.Column(db.Date, nullable=False)
+    creato_da = db.Column(db.Integer, db.ForeignKey('utente.id'), nullable=True)
+    data_creazione = db.Column(db.DateTime, default=datetime.utcnow)
+
+    gestore = db.relationship('Gestore', backref=db.backref('stagioni', lazy=True))
+
+    __table_args__ = (
+        db.Index('idx_stagione_gestore_date', 'gestore_id', 'data_inizio', 'data_fine'),
+    )
+
+
 class GenereEvento(db.Model):
     __tablename__ = 'genere_evento'
     id = db.Column(db.Integer, primary_key=True)
