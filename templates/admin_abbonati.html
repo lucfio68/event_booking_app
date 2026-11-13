@@ -78,7 +78,11 @@
                     <span><span class="seat-color selezione"></span> selezionato</span>
                     <span><span class="seat-color abbonato"></span> già assegnato ad altri (colore della categoria)</span>
                 </div>
-                <div id="mappaPosti" class="seats-container" style="overflow-x:auto;"></div>
+                <!-- il contenitore esterno scorre in orizzontale; quello interno prende la larghezza della mappa
+                     (senza centratura forzata, che nasconderebbe a sinistra la prima colonna) -->
+                <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
+                    <div id="mappaPosti" class="seats-container" style="width:max-content; min-width:100%; box-sizing:border-box; margin:10px 0;"></div>
+                </div>
                 <input type="hidden" name="posti" value="">
                 <button type="button" id="btnDeseleziona" class="btn btn-sm btn-secondary" style="margin-top:8px;">Deseleziona tutti</button>
             </div>
