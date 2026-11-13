@@ -180,8 +180,11 @@ class Prenotazione(db.Model):
     presente = db.Column(db.Boolean, nullable=False, default=False)
     check_in_at = db.Column(db.DateTime, nullable=True)
     check_in_da = db.Column(db.Integer, db.ForeignKey('utente.id'), nullable=True)  # admin che ha segnato la presenza
+    # Gestione Abbonati - Fase 2: categoria (abbonato, fedelissimo, vip...) per etichetta e colore
+    categoria_id = db.Column(db.Integer, db.ForeignKey('categoria_ripetitiva.id', ondelete='SET NULL'), nullable=True)
 
     posti = db.relationship('Posto', backref='prenotazione', lazy=True)
+    categoria = db.relationship('CategoriaRipetitiva', foreign_keys=[categoria_id])
 
 class Posto(db.Model):
     __tablename__ = 'posto'
@@ -193,11 +196,88 @@ class Posto(db.Model):
     colonna = db.Column(db.Integer, nullable=False)
     stato = db.Column(db.String(20), default='libero', index=True)  # libero, prenotato, riservato, abbonato
     prenotazione_id = db.Column(db.Integer, db.ForeignKey('prenotazione.id'), nullable=True)
+    # Gestione Abbonati - Fase 2: da quale prenotazione ripetitiva proviene il posto (idempotenza ed esclusioni)
+    ripetitiva_id = db.Column(db.Integer, db.ForeignKey('prenotazioni_ripetitive.id', ondelete='SET NULL'), nullable=True)
 
     __table_args__ = (
         db.Index('idx_posto_evento_stato', 'evento_id', 'stato'),
         db.Index('idx_posto_prenotazione', 'prenotazione_id'),
         db.Index('idx_posto_evento_fila_colonna', 'evento_id', 'fila', 'colonna'),
+    )
+
+
+class CategoriaRipetitiva(db.Model):
+    """
+    Gestione Abbonati - Fase 2: categoria di una prenotazione ripetitiva (Abbonato, Fedelissimo, Vip...).
+    - stato_posto: come risulta il posto in mappa ('abbonato' | 'riservato')
+    - durata: 'stagione' (vale fino alla fine della stagione) | 'permanente' (vale anche nelle stagioni successive)
+    - promozione_automatica / soglia_partecipazioni: usate dalla Fase 5 (es. fedelissimo dopo 3 partecipazioni)
+    - priorita: in caso di conflitto sullo stesso posto vince la priorita' piu' alta
+    """
+    __tablename__ = 'categoria_ripetitiva'
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(50), nullable=False, unique=True)
+    colore = db.Column(db.String(7), nullable=False, default='#8b5cf6')
+    stato_posto = db.Column(db.String(20), nullable=False, default='abbonato')
+    durata = db.Column(db.String(20), nullable=False, default='stagione')
+    promozione_automatica = db.Column(db.Boolean, nullable=False, default=False)
+    soglia_partecipazioni = db.Column(db.Integer, nullable=True)
+    priorita = db.Column(db.Integer, nullable=False, default=0)
+    attiva = db.Column(db.Boolean, nullable=False, default=True)
+    data_creazione = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class PrenotazioneRipetitiva(db.Model):
+    """
+    Gestione Abbonati - Fase 2: un posto fisso (fila + colonna) di una persona che si ripete
+    su tutti gli eventi di un certo genere, in una sala, per un gestore.
+    Una riga per posto. stagione_id e' NULL per le categorie permanenti.
+    persona_chiave: nome normalizzato (senza maiuscole, accenti, punteggiatura) per riconoscere la stessa persona.
+    ripetibile: interruttore per sospendere la ripetitiva senza cancellarla.
+    """
+    __tablename__ = 'prenotazioni_ripetitive'
+    id = db.Column(db.Integer, primary_key=True)
+    categoria_id = db.Column(db.Integer, db.ForeignKey('categoria_ripetitiva.id'), nullable=False, index=True)
+    gestore_id = db.Column(db.Integer, db.ForeignKey('gestore.id'), nullable=False, index=True)
+    stagione_id = db.Column(db.Integer, db.ForeignKey('stagione.id'), nullable=True, index=True)
+    genere_evento_id = db.Column(db.Integer, db.ForeignKey('genere_evento.id'), nullable=False, index=True)
+    sala_id = db.Column(db.Integer, db.ForeignKey('sala.id'), nullable=False, index=True)
+    nome_prenotazione = db.Column(db.String(150), nullable=False)
+    persona_chiave = db.Column(db.String(150), nullable=False, index=True)
+    fila = db.Column(db.String(10), nullable=False)
+    colonna = db.Column(db.Integer, nullable=False)
+    ripetibile = db.Column(db.Boolean, nullable=False, default=True)
+    origine = db.Column(db.String(30), nullable=False, default='manuale')  # manuale | da_prenotazione | promozione_automatica
+    creato_da = db.Column(db.Integer, db.ForeignKey('utente.id'), nullable=True)
+    data_creazione = db.Column(db.DateTime, default=datetime.utcnow)
+
+    categoria = db.relationship('CategoriaRipetitiva', backref=db.backref('ripetitive', lazy=True))
+    gestore = db.relationship('Gestore')
+    stagione = db.relationship('Stagione', backref=db.backref('ripetitive', lazy=True))
+    genere = db.relationship('GenereEvento')
+    sala = db.relationship('Sala')
+
+    __table_args__ = (
+        # con stagione_id NULL (permanenti) PostgreSQL non applica il vincolo: c'e' anche un controllo nel codice
+        db.UniqueConstraint('gestore_id', 'stagione_id', 'genere_evento_id', 'sala_id', 'fila', 'colonna',
+                            name='uq_ripetitiva_posto'),
+    )
+
+
+class EsclusioneRipetitiva(db.Model):
+    """
+    Gestione Abbonati - Fase 2 (usata dalla Fase 4): l'admin ha liberato il posto di una ripetitiva
+    solo per un singolo evento; il caricamento successivo non deve riassegnarlo.
+    """
+    __tablename__ = 'esclusione_ripetitiva'
+    id = db.Column(db.Integer, primary_key=True)
+    ripetitiva_id = db.Column(db.Integer, db.ForeignKey('prenotazioni_ripetitive.id', ondelete='CASCADE'), nullable=False, index=True)
+    evento_id = db.Column(db.Integer, db.ForeignKey('evento.id', ondelete='CASCADE'), nullable=False, index=True)
+    creato_da = db.Column(db.Integer, db.ForeignKey('utente.id'), nullable=True)
+    data_creazione = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('ripetitiva_id', 'evento_id', name='uq_esclusione_ripetitiva_evento'),
     )
 
 

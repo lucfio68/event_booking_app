@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Categorie Abbonati{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <h2>🏷️ Categorie Abbonati</h2>
+    <p class="text-muted">Le categorie (Abbonato, Fedelissimo, Vip, ...) stabiliscono come si comportano i posti fissi: per quanto tempo valgono, come compaiono in mappa e quale ha la precedenza se due categorie vogliono lo stesso posto.</p>
+
+    <div class="form-card">
+        <h3>{{ 'Modifica Categoria "' ~ categoria_da_modificare.nome ~ '"' if categoria_da_modificare else 'Nuova Categoria' }}</h3>
+        <form method="POST" id="formCategoria"
+              action="{{ url_for('admin_categorie_abbonati_edit', categoria_id=categoria_da_modificare.id) if categoria_da_modificare else url_for('admin_categorie_abbonati_add') }}">
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Nome *</label>
+                    <input type="text" name="nome" required maxlength="50" class="form-control"
+                           value="{{ categoria_da_modificare.nome if categoria_da_modificare else '' }}" placeholder="es. Abbonato">
+                </div>
+                <div class="form-group col-6">
+                    <label>Colore</label>
+                    <input type="color" name="colore" class="form-control" style="height:42px; padding:4px;"
+                           value="{{ categoria_da_modificare.colore if categoria_da_modificare else '#8b5cf6' }}">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Come risulta il posto in mappa *</label>
+                    <select name="stato_posto" class="form-control" required>
+                        <option value="abbonato" {% if not categoria_da_modificare or categoria_da_modificare.stato_posto == 'abbonato' %}selected{% endif %}>Abbonato</option>
+                        <option value="riservato" {% if categoria_da_modificare and categoria_da_modificare.stato_posto == 'riservato' %}selected{% endif %}>Riservato</option>
+                    </select>
+                </div>
+                <div class="form-group col-6">
+                    <label>Durata *</label>
+                    <select name="durata" id="selDurata" class="form-control" required>
+                        <option value="stagione" {% if not categoria_da_modificare or categoria_da_modificare.durata == 'stagione' %}selected{% endif %}>Per tutta la stagione</option>
+                        <option value="permanente" {% if categoria_da_modificare and categoria_da_modificare.durata == 'permanente' %}selected{% endif %}>Permanente (anche nelle stagioni successive)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Priorità <span class="text-muted" style="font-size:0.8em; font-weight:normal;">(se due categorie vogliono lo stesso posto vince la più alta)</span></label>
+                    <input type="number" name="priorita" min="0" max="999" class="form-control"
+                           value="{{ categoria_da_modificare.priorita if categoria_da_modificare else 0 }}">
+                </div>
+                <div class="form-group col-6">
+                    <label>&nbsp;</label>
+                    <label style="font-weight:normal; display:block; margin-top:8px;">
+                        <input type="checkbox" name="attiva" {% if not categoria_da_modificare or categoria_da_modificare.attiva %}checked{% endif %}> Categoria attiva (utilizzabile per nuovi abbonati)
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label style="font-weight:normal;">
+                    <input type="checkbox" name="promozione_automatica" id="chkAuto" {% if categoria_da_modificare and categoria_da_modificare.promozione_automatica %}checked{% endif %}>
+                    Promozione automatica dopo un certo numero di partecipazioni <span class="text-muted" style="font-size:0.85em;">(solo categorie permanenti; sarà attiva in un prossimo aggiornamento)</span>
+                </label>
+                <div id="boxSoglia" style="margin-top:8px;">
+                    <label>Dopo quante partecipazioni allo stesso genere di evento</label>
+                    <input type="number" name="soglia_partecipazioni" min="1" class="form-control" style="max-width:160px;"
+                           value="{{ categoria_da_modificare.soglia_partecipazioni if categoria_da_modificare and categoria_da_modificare.soglia_partecipazioni else 3 }}">
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary">{{ 'Salva Modifiche' if categoria_da_modificare else 'Crea Categoria' }}</button>
+            {% if categoria_da_modificare %}
+            <a href="{{ url_for('admin_categorie_abbonati') }}" class="btn btn-secondary">Annulla</a>
+            {% endif %}
+        </form>
+    </div>
+
+    <div class="prenotazioni-list">
+        <h3>Categorie esistenti ({{ categorie|length }})</h3>
+        {% if categorie %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Categoria</th>
+                    <th>Posto in mappa</th>
+                    <th>Durata</th>
+                    <th>Promozione automatica</th>
+                    <th>Priorità</th>
+                    <th>Posti assegnati</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in categorie %}
+                <tr>
+                    <td>
+                        <span style="display:inline-block; width:14px; height:14px; border-radius:3px; background:{{ c.colore }}; vertical-align:middle; margin-right:6px;"></span>
+                        <strong>{{ c.nome }}</strong>
+                        {% if not c.attiva %}<span class="text-muted">(non attiva)</span>{% endif %}
+                    </td>
+                    <td>{{ 'Riservato' if c.stato_posto == 'riservato' else 'Abbonato' }}</td>
+                    <td>{{ 'Permanente' if c.durata == 'permanente' else 'Stagione' }}</td>
+                    <td>{% if c.promozione_automatica %}dopo {{ c.soglia_partecipazioni }} partecipazioni{% else %}-{% endif %}</td>
+                    <td>{{ c.priorita }}</td>
+                    <td>{{ utilizzi.get(c.id, 0) }}</td>
+                    <td style="display:flex; gap:6px;">
+                        <a href="{{ url_for('admin_categorie_abbonati', modifica=c.id) }}" class="btn btn-sm btn-secondary">Modifica</a>
+                        <form method="POST" action="{{ url_for('admin_categorie_abbonati_delete', categoria_id=c.id) }}" style="display:inline;" onsubmit='return confirm({{ ("Eliminare la categoria \"" ~ c.nome ~ "\"?")|tojson }});'>
+                            <button type="submit" class="btn btn-sm btn-danger">Elimina</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>Nessuna categoria creata finora.</p>
+        {% endif %}
+    </div>
+
+    <a href="{{ url_for('admin_abbonati') }}" class="btn btn-outline">Vai a Gestione Abbonati</a>
+    <a href="{{ url_for('calendar_view') }}" class="btn btn-outline">Torna al Calendario</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var durata = document.getElementById('selDurata');
+    var auto = document.getElementById('chkAuto');
+    var box = document.getElementById('boxSoglia');
+    if (!durata || !auto || !box) return;
+    function aggiorna() {
+        var permanente = durata.value === 'permanente';
+        auto.disabled = !permanente;
+        if (!permanente) { auto.checked = false; }
+        box.style.display = auto.checked ? '' : 'none';
+    }
+    durata.addEventListener('change', aggiorna);
+    auto.addEventListener('change', aggiorna);
+    aggiorna();
+})();
+</script>
+{% endblock %}

@@ -109,7 +109,7 @@
                     <td>{{ conteggi_eventi[s.id] }}</td>
                     <td style="display:flex; gap:6px;">
                         <a href="{{ url_for('admin_stagioni', modifica=s.id, gestore_id=filtro_gestore_id) if filtro_gestore_id else url_for('admin_stagioni', modifica=s.id) }}" class="btn btn-sm btn-secondary">Modifica</a>
-                        <form method="POST" action="{{ url_for('admin_stagioni_delete', stagione_id=s.id) }}" style="display:inline;" onsubmit="return confirm('Eliminare la stagione &quot;{{ s.nome_stagione }}&quot;? Gli eventi non vengono toccati.');">
+                        <form method="POST" action="{{ url_for('admin_stagioni_delete', stagione_id=s.id) }}" style="display:inline;" onsubmit='return confirm({{ ("Eliminare la stagione \"" ~ s.nome_stagione ~ "\"? Gli eventi non vengono toccati.")|tojson }});'>
                             <button type="submit" class="btn btn-sm btn-danger">Elimina</button>
                         </form>
                     </td>

@@ -1,5 +1,6 @@
 import os
 import re
+import unicodedata
 import io
 import threading
 import socket
@@ -18,6 +19,7 @@ from flask_mail import Mail, Message
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from sqlalchemy import func, or_, text, inspect
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 from itsdangerous import URLSafeTimedSerializer
 
@@ -40,7 +42,8 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from models import (
     db, Utente, Sala, Evento, Prenotazione, Posto,
     GenereEvento, LayoutPosti, GoogleConnessione,
-    CalendarioGoogle, Gestore, Stagione
+    CalendarioGoogle, Gestore, Stagione,
+    CategoriaRipetitiva, PrenotazioneRipetitiva, EsclusioneRipetitiva
 )
 from config import Config
 
@@ -1892,6 +1895,15 @@ def admin_gestori_delete(gestore_id):
         )
         return redirect(url_for('admin_gestori'))
 
+    ripetitive_collegate = PrenotazioneRipetitiva.query.filter_by(gestore_id=gestore_id).count()
+    if ripetitive_collegate > 0:
+        flash(
+            f"Impossibile eliminare '{gestore.ragione_sociale}': ha {ripetitive_collegate} posti di abbonati collegati. "
+            f"Eliminali prima da Gestione Abbonati.",
+            'danger'
+        )
+        return redirect(url_for('admin_gestori'))
+
     db.session.delete(gestore)
     db.session.commit()
     flash('Gestore eliminato.', 'success')
@@ -2023,13 +2035,521 @@ def admin_stagioni_delete(stagione_id):
     if not stagione:
         abort(404)
 
-    # Fase 2: qui si blocchera' l'eliminazione se esistono prenotazioni ripetitive collegate.
+    ripetitive_collegate = PrenotazioneRipetitiva.query.filter_by(stagione_id=stagione_id).count()
+    if ripetitive_collegate > 0:
+        flash(
+            f"Impossibile eliminare '{stagione.nome_stagione}': ha {ripetitive_collegate} posti di abbonati collegati. "
+            f"Eliminali prima da Gestione Abbonati.",
+            'danger'
+        )
+        return redirect(url_for('admin_stagioni'))
 
     nome = stagione.nome_stagione
     db.session.delete(stagione)
     db.session.commit()
     flash(f"Stagione '{nome}' eliminata.", 'success')
     return redirect(url_for('admin_stagioni'))
+
+
+# ------------------------------------------------------------------------------
+# GESTIONE ABBONATI - Fase 2: categorie e prenotazioni ripetitive
+# ------------------------------------------------------------------------------
+
+CATEGORIE_RIPETITIVE_INIZIALI = [
+    # nome, colore, stato_posto, durata, promozione_automatica, soglia, priorita (piu' alta vince)
+    ('Abbonato', '#8b5cf6', 'abbonato', 'stagione', False, None, 30),
+    ('Fedelissimo', '#eab308', 'abbonato', 'permanente', True, 3, 20),
+    ('Vip', '#ec4899', 'riservato', 'stagione', False, None, 10),
+]
+_RE_COLORE = re.compile(r'^#[0-9a-fA-F]{6}$')
+_RE_POSTO = re.compile(r'^([A-Z])(\d{1,3})$')
+
+
+def _seed_categorie_ripetitive():
+    """Inserisce le categorie iniziali (modificabili dall'admin) se la tabella e' vuota."""
+    if CategoriaRipetitiva.query.count() > 0:
+        return
+    for nome, colore, stato, durata, auto, soglia, priorita in CATEGORIE_RIPETITIVE_INIZIALI:
+        db.session.add(CategoriaRipetitiva(
+            nome=nome, colore=colore, stato_posto=stato, durata=durata,
+            promozione_automatica=auto, soglia_partecipazioni=soglia, priorita=priorita, attiva=True
+        ))
+    db.session.commit()
+    app.logger.info('startup-migration: inserite le categorie ripetitive iniziali')
+
+
+def _normalizza_persona(nome):
+    """Chiave per riconoscere la stessa persona: senza maiuscole, accenti, punteggiatura e spazi doppi.
+    "CHILO' Gabriele" e "Chilo Gabriele" danno la stessa chiave."""
+    testo = unicodedata.normalize('NFKD', nome or '')
+    testo = ''.join(ch for ch in testo if not unicodedata.combining(ch))
+    testo = re.sub(r'[^\w\s]', '', testo.casefold())
+    return ' '.join(testo.split())
+
+
+def _layout_per_sala_genere(sala_id, genere_id):
+    """Layout di riferimento per scegliere i posti: quello predefinito del genere, altrimenti quello della sala."""
+    layout = LayoutPosti.query.filter_by(sala_id=sala_id, genere_evento_id=genere_id, is_default=True).first()
+    return layout or _layout_default_per_sala(sala_id)
+
+
+def _filtro_stagione(stagione_id):
+    if stagione_id is None:
+        return PrenotazioneRipetitiva.stagione_id.is_(None)
+    return PrenotazioneRipetitiva.stagione_id == stagione_id
+
+
+def _righe_gruppo(riga):
+    """Tutte le righe (un posto ciascuna) della stessa persona/categoria/stagione/genere/sala/gestore."""
+    return PrenotazioneRipetitiva.query.filter(
+        PrenotazioneRipetitiva.gestore_id == riga.gestore_id,
+        PrenotazioneRipetitiva.genere_evento_id == riga.genere_evento_id,
+        PrenotazioneRipetitiva.sala_id == riga.sala_id,
+        PrenotazioneRipetitiva.categoria_id == riga.categoria_id,
+        PrenotazioneRipetitiva.persona_chiave == riga.persona_chiave,
+        _filtro_stagione(riga.stagione_id)
+    ).order_by(PrenotazioneRipetitiva.fila, PrenotazioneRipetitiva.colonna).all()
+
+
+def _elimina_ripetitive(righe):
+    """Elimina le righe e pulisce i riferimenti (posti degli eventi gia' caricati ed esclusioni)."""
+    ids = [r.id for r in righe]
+    if not ids:
+        return
+    Posto.query.filter(Posto.ripetitiva_id.in_(ids)).update({Posto.ripetitiva_id: None}, synchronize_session=False)
+    EsclusioneRipetitiva.query.filter(EsclusioneRipetitiva.ripetitiva_id.in_(ids)).delete(synchronize_session=False)
+    for r in righe:
+        db.session.delete(r)
+
+
+def _ordina_codici_posto(codici):
+    """Ordine naturale: A1, A2, A10, B1 (e non A1, A10, A2)."""
+    def chiave(c):
+        m = _RE_POSTO.match(c)
+        return (m.group(1), int(m.group(2))) if m else (c, 0)
+    return sorted(codici, key=chiave)
+
+
+# ---- Categorie ----
+
+def _leggi_categoria_da_form(categoria_esistente=None):
+    """Legge e valida il form di una Categoria. Ritorna (dati, errore)."""
+    nome = (request.form.get('nome') or '').strip()
+    colore = (request.form.get('colore') or '').strip()
+    stato_posto = request.form.get('stato_posto')
+    durata = request.form.get('durata')
+    promozione = request.form.get('promozione_automatica') == 'on'
+    soglia = request.form.get('soglia_partecipazioni', type=int)
+    priorita = request.form.get('priorita', type=int)
+    attiva = request.form.get('attiva') == 'on'
+
+    if not nome:
+        return None, 'Il nome della categoria è obbligatorio.'
+    if len(nome) > 50:
+        return None, 'Il nome della categoria è troppo lungo (massimo 50 caratteri).'
+    if not _RE_COLORE.match(colore):
+        return None, 'Il colore non è valido.'
+    if stato_posto not in ('abbonato', 'riservato'):
+        return None, 'Scegli come deve risultare il posto in mappa (abbonato o riservato).'
+    if durata not in ('stagione', 'permanente'):
+        return None, 'Scegli la durata della categoria.'
+    if promozione and durata != 'permanente':
+        return None, 'La promozione automatica è disponibile solo per le categorie permanenti.'
+    if promozione and (soglia is None or soglia < 1):
+        return None, 'Indica dopo quante partecipazioni scatta la promozione automatica (almeno 1).'
+    if priorita is None:
+        priorita = 0
+    if not 0 <= priorita <= 999:
+        return None, 'La priorità deve essere un numero tra 0 e 999.'
+
+    duplicata = CategoriaRipetitiva.query.filter(func.lower(CategoriaRipetitiva.nome) == nome.lower())
+    if categoria_esistente:
+        duplicata = duplicata.filter(CategoriaRipetitiva.id != categoria_esistente.id)
+    if duplicata.first():
+        return None, f"Esiste già una categoria chiamata '{nome}'."
+
+    if categoria_esistente and categoria_esistente.durata != durata:
+        if PrenotazioneRipetitiva.query.filter_by(categoria_id=categoria_esistente.id).count() > 0:
+            return None, ("Non puoi cambiare la durata di una categoria già usata da abbonati: "
+                          "crea una nuova categoria oppure elimina prima quegli abbonati.")
+
+    return {
+        'nome': nome, 'colore': colore.lower(), 'stato_posto': stato_posto, 'durata': durata,
+        'promozione_automatica': promozione, 'soglia_partecipazioni': soglia if promozione else None,
+        'priorita': priorita, 'attiva': attiva,
+    }, None
+
+
+@app.route('/admin/categorie-abbonati')
+@login_required
+def admin_categorie_abbonati():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    categorie = CategoriaRipetitiva.query.order_by(CategoriaRipetitiva.priorita.desc(), CategoriaRipetitiva.nome).all()
+    utilizzi = dict(
+        db.session.query(PrenotazioneRipetitiva.categoria_id, func.count(PrenotazioneRipetitiva.id))
+        .group_by(PrenotazioneRipetitiva.categoria_id).all()
+    )
+    modifica_id = request.args.get('modifica', type=int)
+    categoria_da_modificare = db.session.get(CategoriaRipetitiva, modifica_id) if modifica_id else None
+    return render_template(
+        'admin_categorie_abbonati.html', categorie=categorie, utilizzi=utilizzi,
+        categoria_da_modificare=categoria_da_modificare
+    )
+
+
+@app.route('/admin/categorie-abbonati/add', methods=['POST'])
+@login_required
+def admin_categorie_abbonati_add():
+    if not current_user.is_admin():
+        abort(403)
+    dati, errore = _leggi_categoria_da_form()
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_categorie_abbonati'))
+    db.session.add(CategoriaRipetitiva(**dati))
+    db.session.commit()
+    flash(f"Categoria '{dati['nome']}' creata.", 'success')
+    return redirect(url_for('admin_categorie_abbonati'))
+
+
+@app.route('/admin/categorie-abbonati/<int:categoria_id>/edit', methods=['POST'])
+@login_required
+def admin_categorie_abbonati_edit(categoria_id):
+    if not current_user.is_admin():
+        abort(403)
+    categoria = db.session.get(CategoriaRipetitiva, categoria_id)
+    if not categoria:
+        abort(404)
+    dati, errore = _leggi_categoria_da_form(categoria_esistente=categoria)
+    if errore:
+        flash(errore, 'danger')
+        return redirect(url_for('admin_categorie_abbonati', modifica=categoria_id))
+    for campo, valore in dati.items():
+        setattr(categoria, campo, valore)
+    db.session.commit()
+    flash(f"Categoria '{categoria.nome}' aggiornata.", 'success')
+    return redirect(url_for('admin_categorie_abbonati'))
+
+
+@app.route('/admin/categorie-abbonati/<int:categoria_id>/delete', methods=['POST'])
+@login_required
+def admin_categorie_abbonati_delete(categoria_id):
+    if not current_user.is_admin():
+        abort(403)
+    categoria = db.session.get(CategoriaRipetitiva, categoria_id)
+    if not categoria:
+        abort(404)
+    usi = PrenotazioneRipetitiva.query.filter_by(categoria_id=categoria_id).count()
+    if usi > 0:
+        flash(f"Impossibile eliminare '{categoria.nome}': è usata da {usi} posti di abbonati. "
+              f"Puoi disattivarla dalla modifica.", 'danger')
+        return redirect(url_for('admin_categorie_abbonati'))
+    nome = categoria.nome
+    db.session.delete(categoria)
+    db.session.commit()
+    flash(f"Categoria '{nome}' eliminata.", 'success')
+    return redirect(url_for('admin_categorie_abbonati'))
+
+
+# ---- Abbonati (prenotazioni ripetitive) ----
+
+def _leggi_ripetitiva_da_form(categoria_corrente_id=None):
+    """Valida il modulo Gestione Abbonati. Ritorna (dati, errore)."""
+    nome = (request.form.get('nome_prenotazione') or '').strip()
+    gestore_id = request.form.get('gestore_id', type=int)
+    categoria_id = request.form.get('categoria_id', type=int)
+    stagione_id = request.form.get('stagione_id', type=int)
+    genere_id = request.form.get('genere_id', type=int)
+    sala_id = request.form.get('sala_id', type=int)
+    codici = [c.strip().upper() for c in (request.form.get('posti') or '').split(',') if c.strip()]
+
+    if not nome:
+        return None, 'Il nome della prenotazione è obbligatorio.'
+    if len(nome) > 150:
+        return None, 'Il nome della prenotazione è troppo lungo (massimo 150 caratteri).'
+    if not _normalizza_persona(nome):
+        return None, 'Il nome della prenotazione deve contenere almeno una lettera o un numero.'
+
+    gestore = db.session.get(Gestore, gestore_id) if gestore_id else None
+    if not gestore:
+        return None, 'Seleziona un gestore valido.'
+
+    categoria = db.session.get(CategoriaRipetitiva, categoria_id) if categoria_id else None
+    if not categoria:
+        return None, 'Seleziona una categoria valida.'
+    if not categoria.attiva and categoria.id != categoria_corrente_id:
+        return None, f"La categoria '{categoria.nome}' non è attiva."
+
+    if categoria.durata == 'stagione':
+        stagione = db.session.get(Stagione, stagione_id) if stagione_id else None
+        if not stagione or stagione.gestore_id != gestore.id:
+            return None, 'Per questa categoria serve una stagione del gestore selezionato.'
+    else:
+        stagione_id = None  # categoria permanente: vale anche nelle stagioni successive
+
+    genere = db.session.get(GenereEvento, genere_id) if genere_id else None
+    if not genere or genere.gestore_id not in (None, gestore.id):
+        return None, 'Seleziona un genere del gestore (o un genere senza gestore).'
+
+    sala = db.session.get(Sala, sala_id) if sala_id else None
+    if not sala:
+        return None, 'Seleziona una sala valida.'
+
+    layout = _layout_per_sala_genere(sala.id, genere.id)
+    if not layout:
+        return None, f"Per la sala '{sala.nome}' non è configurato un layout predefinito: impossibile scegliere i posti."
+
+    if not codici:
+        return None, 'Seleziona almeno un posto sulla mappa.'
+    posti = []
+    for codice in codici:
+        m = _RE_POSTO.match(codice)
+        if not m:
+            return None, f"Posto non valido: '{codice}'."
+        fila, colonna = m.group(1), int(m.group(2))
+        if not 1 <= ord(fila) - 64 <= layout.file or not 1 <= colonna <= layout.colonne:
+            return None, f"Il posto {codice} non esiste nel layout '{layout.nome}' ({layout.file} file x {layout.colonne} colonne)."
+        if (fila, colonna) not in posti:
+            posti.append((fila, colonna))
+
+    return {
+        'nome': nome, 'persona_chiave': _normalizza_persona(nome), 'gestore_id': gestore.id,
+        'categoria_id': categoria.id, 'stagione_id': stagione_id, 'genere_id': genere.id,
+        'sala_id': sala.id, 'posti': posti,
+    }, None
+
+
+@app.route('/admin/abbonati')
+@login_required
+def admin_abbonati():
+    if not current_user.is_admin():
+        flash('Accesso riservato agli amministratori.', 'danger')
+        return redirect(url_for('calendar_view'))
+
+    gestori = Gestore.query.order_by(Gestore.ragione_sociale).all()
+    stagioni = Stagione.query.order_by(Stagione.data_inizio.desc(), Stagione.nome_stagione).all()
+    generi = GenereEvento.query.order_by(GenereEvento.nome).all()
+    sale = Sala.query.order_by(Sala.nome).all()
+    categorie = CategoriaRipetitiva.query.order_by(CategoriaRipetitiva.priorita.desc(), CategoriaRipetitiva.nome).all()
+
+    filtri = {
+        'gestore_id': request.args.get('gestore_id', type=int),
+        'stagione_id': request.args.get('stagione_id', type=int),
+        'genere_id': request.args.get('genere_id', type=int),
+        'sala_id': request.args.get('sala_id', type=int),
+        'categoria_id': request.args.get('categoria_id', type=int),
+        'q': (request.args.get('q') or '').strip(),
+    }
+    query = PrenotazioneRipetitiva.query.options(
+        joinedload(PrenotazioneRipetitiva.categoria), joinedload(PrenotazioneRipetitiva.gestore),
+        joinedload(PrenotazioneRipetitiva.stagione), joinedload(PrenotazioneRipetitiva.genere),
+        joinedload(PrenotazioneRipetitiva.sala)
+    )
+    if filtri['gestore_id']:
+        query = query.filter(PrenotazioneRipetitiva.gestore_id == filtri['gestore_id'])
+    if filtri['stagione_id']:
+        query = query.filter(PrenotazioneRipetitiva.stagione_id == filtri['stagione_id'])
+    if filtri['genere_id']:
+        query = query.filter(PrenotazioneRipetitiva.genere_evento_id == filtri['genere_id'])
+    if filtri['sala_id']:
+        query = query.filter(PrenotazioneRipetitiva.sala_id == filtri['sala_id'])
+    if filtri['categoria_id']:
+        query = query.filter(PrenotazioneRipetitiva.categoria_id == filtri['categoria_id'])
+    if filtri['q']:
+        chiave_ricerca = _normalizza_persona(filtri['q'])
+        if chiave_ricerca:
+            query = query.filter(PrenotazioneRipetitiva.persona_chiave.contains(chiave_ricerca))
+    righe = query.order_by(
+        PrenotazioneRipetitiva.persona_chiave, PrenotazioneRipetitiva.stagione_id,
+        PrenotazioneRipetitiva.fila, PrenotazioneRipetitiva.colonna
+    ).all()
+
+    gruppi = {}
+    for r in righe:
+        chiave = (r.gestore_id, r.stagione_id, r.genere_evento_id, r.sala_id, r.categoria_id, r.persona_chiave)
+        g = gruppi.setdefault(chiave, {'riga': r, 'posti': [], 'attivi': 0})
+        g['posti'].append(f"{r.fila}{r.colonna}")
+        g['attivi'] += 1 if r.ripetibile else 0
+    elenco = []
+    for g in gruppi.values():
+        r = g['riga']
+        n = len(g['posti'])
+        elenco.append({
+            'riga_id': r.id, 'nome': r.nome_prenotazione, 'categoria': r.categoria, 'gestore': r.gestore,
+            'stagione': r.stagione, 'genere': r.genere, 'sala': r.sala, 'posti': _ordina_codici_posto(g['posti']),
+            'stato': 'Attivo' if g['attivi'] == n else ('Sospeso' if g['attivi'] == 0 else 'Parziale'),
+        })
+
+    # modulo: modifica di un gruppo esistente oppure nuovo (con i filtri come valori iniziali)
+    modifica_id = request.args.get('modifica', type=int)
+    riga_mod = db.session.get(PrenotazioneRipetitiva, modifica_id) if modifica_id else None
+    if riga_mod:
+        gruppo_righe = _righe_gruppo(riga_mod)
+        iniziale = {
+            'gruppo_id': riga_mod.id, 'nome': riga_mod.nome_prenotazione, 'gestore_id': riga_mod.gestore_id,
+            'stagione_id': riga_mod.stagione_id, 'genere_id': riga_mod.genere_evento_id, 'sala_id': riga_mod.sala_id,
+            'categoria_id': riga_mod.categoria_id, 'posti': _ordina_codici_posto([f"{r.fila}{r.colonna}" for r in gruppo_righe]),
+        }
+    else:
+        iniziale = {
+            'gruppo_id': None, 'nome': '', 'gestore_id': filtri['gestore_id'], 'stagione_id': filtri['stagione_id'],
+            'genere_id': filtri['genere_id'], 'sala_id': filtri['sala_id'], 'categoria_id': filtri['categoria_id'], 'posti': [],
+        }
+
+    dati_form = {
+        'stagioni': [{'id': s.id, 'nome': s.nome_stagione, 'gestore_id': s.gestore_id,
+                      'periodo': f"{s.data_inizio.strftime('%d/%m/%Y')} - {s.data_fine.strftime('%d/%m/%Y')}"} for s in stagioni],
+        'generi': [{'id': g.id, 'nome': g.nome, 'gestore_id': g.gestore_id} for g in generi],
+        'categorie': [{'id': c.id, 'nome': c.nome, 'durata': c.durata, 'attiva': c.attiva} for c in categorie],
+    }
+    return render_template(
+        'admin_abbonati.html', gruppi=elenco, gestori=gestori, stagioni=stagioni, generi=generi, sale=sale,
+        categorie=categorie, filtri=filtri, iniziale=iniziale, dati_form=dati_form,
+        in_modifica=bool(riga_mod)
+    )
+
+
+@app.route('/api/abbonati/mappa')
+@login_required
+def api_abbonati_mappa():
+    """Layout di riferimento e posti gia' presi da altre ripetitive, per la mappa di Gestione Abbonati."""
+    if not current_user.is_admin():
+        return jsonify({'error': 'Accesso negato'}), 403
+
+    sala_id = request.args.get('sala_id', type=int)
+    genere_id = request.args.get('genere_id', type=int)
+    gestore_id = request.args.get('gestore_id', type=int)
+    stagione_id = request.args.get('stagione_id', type=int)  # assente = categoria permanente
+    escludi_id = request.args.get('escludi', type=int)
+    if not (sala_id and genere_id and gestore_id):
+        return jsonify({'error': 'Parametri mancanti'}), 400
+
+    layout = _layout_per_sala_genere(sala_id, genere_id)
+    if not layout:
+        return jsonify({'error': 'Nessun layout predefinito configurato per questa sala.'}), 404
+
+    query = PrenotazioneRipetitiva.query.options(joinedload(PrenotazioneRipetitiva.categoria)).filter(
+        PrenotazioneRipetitiva.gestore_id == gestore_id,
+        PrenotazioneRipetitiva.genere_evento_id == genere_id,
+        PrenotazioneRipetitiva.sala_id == sala_id,
+        _filtro_stagione(stagione_id)
+    )
+    if escludi_id:
+        riga = db.session.get(PrenotazioneRipetitiva, escludi_id)
+        if riga:
+            query = query.filter(~PrenotazioneRipetitiva.id.in_([r.id for r in _righe_gruppo(riga)]))
+
+    return jsonify({
+        'layout': {
+            'nome': layout.nome, 'file': layout.file, 'colonne': layout.colonne,
+            'corridoio_colonne': _parse_corridoi_pdf(layout.corridoio_colonne),
+            'corridoio_file': _parse_corridoi_pdf(layout.corridoio_file),
+        },
+        'occupati': [
+            {'posto': f"{r.fila}{r.colonna}", 'nome': r.nome_prenotazione, 'categoria': r.categoria.nome,
+             'colore': r.categoria.colore, 'sospeso': not r.ripetibile}
+            for r in query.all()
+        ],
+    })
+
+
+@app.route('/admin/abbonati/save', methods=['POST'])
+@login_required
+def admin_abbonati_save():
+    if not current_user.is_admin():
+        abort(403)
+
+    gruppo_id = request.form.get('gruppo_id', type=int)
+    riga_rif = db.session.get(PrenotazioneRipetitiva, gruppo_id) if gruppo_id else None
+    if gruppo_id and not riga_rif:
+        abort(404)
+    righe_gruppo = _righe_gruppo(riga_rif) if riga_rif else []
+    torna = url_for('admin_abbonati', modifica=gruppo_id) if gruppo_id else url_for('admin_abbonati')
+
+    dati, errore = _leggi_ripetitiva_da_form(categoria_corrente_id=riga_rif.categoria_id if riga_rif else None)
+    if errore:
+        flash(errore, 'danger')
+        return redirect(torna)
+
+    # un posto puo' avere un solo titolare per (gestore, stagione, genere, sala)
+    id_gruppo = {r.id for r in righe_gruppo}
+    posti_scelti = set(dati['posti'])
+    altre = PrenotazioneRipetitiva.query.filter(
+        PrenotazioneRipetitiva.gestore_id == dati['gestore_id'],
+        PrenotazioneRipetitiva.genere_evento_id == dati['genere_id'],
+        PrenotazioneRipetitiva.sala_id == dati['sala_id'],
+        _filtro_stagione(dati['stagione_id'])
+    ).all()
+    conflitti = [r for r in altre if (r.fila, r.colonna) in posti_scelti and r.id not in id_gruppo]
+    if conflitti:
+        elenco = ', '.join(f"{r.fila}{r.colonna} ({r.nome_prenotazione})" for r in sorted(conflitti, key=lambda r: (r.fila, r.colonna)))
+        flash(f"Alcuni posti sono già assegnati ad altri abbonati per questa stagione, genere e sala: {elenco}.", 'danger')
+        return redirect(torna)
+
+    try:
+        esistenti = {(r.fila, r.colonna): r for r in righe_gruppo}
+        attivo = any(r.ripetibile for r in righe_gruppo) if righe_gruppo else True
+        da_eliminare = [r for chiave, r in esistenti.items() if chiave not in posti_scelti]
+        _elimina_ripetitive(da_eliminare)
+        for fila, colonna in dati['posti']:
+            riga = esistenti.get((fila, colonna))
+            if riga is None:
+                riga = PrenotazioneRipetitiva(fila=fila, colonna=colonna, ripetibile=attivo,
+                                              origine='manuale', creato_da=current_user.id)
+                db.session.add(riga)
+            riga.nome_prenotazione = dati['nome']
+            riga.persona_chiave = dati['persona_chiave']
+            riga.gestore_id = dati['gestore_id']
+            riga.categoria_id = dati['categoria_id']
+            riga.stagione_id = dati['stagione_id']
+            riga.genere_evento_id = dati['genere_id']
+            riga.sala_id = dati['sala_id']
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash('Salvataggio non riuscito: uno dei posti è già assegnato. Ricarica la pagina e riprova.', 'danger')
+        return redirect(torna)
+
+    n = len(dati['posti'])
+    flash(f"Abbonato '{dati['nome']}' {'aggiornato' if riga_rif else 'creato'}: {n} {'posto' if n == 1 else 'posti'}.", 'success')
+    return redirect(url_for('admin_abbonati', gestore_id=dati['gestore_id']))
+
+
+@app.route('/admin/abbonati/<int:riga_id>/toggle', methods=['POST'])
+@login_required
+def admin_abbonati_toggle(riga_id):
+    """Sospende (o riattiva) tutti i posti dell'abbonato senza cancellarli."""
+    if not current_user.is_admin():
+        abort(403)
+    riga = db.session.get(PrenotazioneRipetitiva, riga_id)
+    if not riga:
+        abort(404)
+    righe = _righe_gruppo(riga)
+    nuovo_valore = not any(r.ripetibile for r in righe)
+    for r in righe:
+        r.ripetibile = nuovo_valore
+    db.session.commit()
+    flash(f"Abbonato '{riga.nome_prenotazione}' {'riattivato' if nuovo_valore else 'sospeso'}.", 'success')
+    return redirect(request.referrer or url_for('admin_abbonati'))
+
+
+@app.route('/admin/abbonati/<int:riga_id>/delete', methods=['POST'])
+@login_required
+def admin_abbonati_delete(riga_id):
+    if not current_user.is_admin():
+        abort(403)
+    riga = db.session.get(PrenotazioneRipetitiva, riga_id)
+    if not riga:
+        abort(404)
+    nome = riga.nome_prenotazione
+    righe = _righe_gruppo(riga)
+    _elimina_ripetitive(righe)
+    db.session.commit()
+    flash(f"Abbonato '{nome}' eliminato ({len(righe)} posti). Le prenotazioni già caricate sugli eventi non vengono toccate.", 'success')
+    return redirect(request.referrer or url_for('admin_abbonati'))
 
 
 @app.route('/admin/generi')
@@ -2154,6 +2674,14 @@ def admin_generi_delete(genere_id):
     if eventi_collegati > 0:
         flash(
             f"Impossibile eliminare '{genere.nome}': è collegato a {eventi_collegati} eventi esistenti.",
+            'danger'
+        )
+        return redirect(url_for('admin_generi'))
+
+    ripetitive_collegate = PrenotazioneRipetitiva.query.filter_by(genere_evento_id=genere_id).count()
+    if ripetitive_collegate > 0:
+        flash(
+            f"Impossibile eliminare '{genere.nome}': ha {ripetitive_collegate} posti di abbonati collegati.",
             'danger'
         )
         return redirect(url_for('admin_generi'))
@@ -2542,6 +3070,15 @@ def admin_sale_delete(sala_id):
         flash(
             f"Impossibile eliminare '{sala.nome}': ha {layout_collegati} layout posti collegati. "
             f"Eliminali prima dalla Gestione Layout Posti.",
+            'danger'
+        )
+        return redirect(url_for('admin_sale'))
+
+    ripetitive_collegate = PrenotazioneRipetitiva.query.filter_by(sala_id=sala_id).count()
+    if ripetitive_collegate > 0:
+        flash(
+            f"Impossibile eliminare '{sala.nome}': ha {ripetitive_collegate} posti di abbonati collegati. "
+            f"Eliminali prima da Gestione Abbonati.",
             'danger'
         )
         return redirect(url_for('admin_sale'))
@@ -3558,7 +4095,27 @@ def _run_startup_migrations():
                 ))
                 app.logger.info('startup-migration: aggiunta prenotazione.check_in_da')
 
+        # Gestione Abbonati - Fase 2: colonne nuove (le tabelle nuove le crea db.create_all())
+        tabelle = inspector.get_table_names()
+        if 'prenotazione' in tabelle and 'categoria_ripetitiva' in tabelle:
+            cols = {c['name'] for c in inspector.get_columns('prenotazione')}
+            if 'categoria_id' not in cols:
+                db.session.execute(text(
+                    "ALTER TABLE prenotazione ADD COLUMN categoria_id INTEGER "
+                    "REFERENCES categoria_ripetitiva(id) ON DELETE SET NULL"
+                ))
+                app.logger.info('startup-migration: aggiunta prenotazione.categoria_id')
+        if 'posto' in tabelle and 'prenotazioni_ripetitive' in tabelle:
+            cols = {c['name'] for c in inspector.get_columns('posto')}
+            if 'ripetitiva_id' not in cols:
+                db.session.execute(text(
+                    "ALTER TABLE posto ADD COLUMN ripetitiva_id INTEGER "
+                    "REFERENCES prenotazioni_ripetitive(id) ON DELETE SET NULL"
+                ))
+                app.logger.info('startup-migration: aggiunta posto.ripetitiva_id')
+
         db.session.commit()
+        _seed_categorie_ripetitive()
         app.logger.info("Migrazioni di avvio completate (o gia' presenti).")
     except Exception as e:
         db.session.rollback()

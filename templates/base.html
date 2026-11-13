@@ -32,6 +32,7 @@
                 {% if current_user.is_admin() %}
                     <a href="{{ url_for('admin_gestori') }}" class="btn btn-secondary">🏢 Gestori</a>
                     <a href="{{ url_for('admin_stagioni') }}" class="btn btn-secondary">📆 Stagioni</a>
+                    <a href="{{ url_for('admin_abbonati') }}" class="btn btn-secondary">👥 Abbonati</a>
                     <a href="{{ url_for('admin_sale') }}" class="btn btn-secondary">🏛️ Sale</a>
                     <a href="{{ url_for('admin_layout_posti') }}" class="btn btn-secondary">🪑 Layout Posti</a>
                     <a href="{{ url_for('admin_google_status') }}" class="btn btn-secondary">🗓️ Google Calendar</a>

@@ -332,6 +332,7 @@
         <li><a href="#admin-google-import">3.17 Google Calendar — Import Eventi</a></li>
         <li><a href="#admin-gestori">3.18 Gestione Gestori</a></li>
         <li><a href="#admin-stagioni">3.19 Gestione Stagioni</a></li>
+        <li><a href="#admin-abbonati">3.20 Gestione Abbonati</a></li>
         <li><a href="#schema">4. Schema Database</a></li>
         <li><a href="#faq-overbooking">4.1 Overbooking — come funziona</a></li>
         {% endif %}
@@ -1688,6 +1689,65 @@ source venv/bin/activate    (Linux/Mac)</pre>
     </div>
 </div>
 
+<div class="section" id="admin-abbonati">
+    <h2><span class="badge badge-admin">Admin</span> 3.20 Gestione Abbonati</h2>
+    <p>La <strong>Gestione Abbonati</strong> serve a registrare i <strong>posti fissi</strong> di abbonati, fedelissimi, vip e simili (le «prenotazioni ripetitive»): una persona, una <em>categoria</em> e i suoi posti, validi per tutti gli eventi di un certo <strong>genere</strong> in una <strong>sala</strong>, per un <strong>Gestore</strong> e, di norma, per una <a href="#admin-stagioni">Stagione</a>. Si apre dalla voce <strong>👥 Abbonati</strong> del menu in alto.</p>
+    <div class="alert alert-info">
+        <strong>Stato dell'aggiornamento:</strong> in questa versione si registrano e si gestiscono gli abbonati. Il <strong>caricamento automatico</strong> dei loro posti sugli eventi (alla creazione di un evento, all'importazione da Google Calendar o con un pulsante) arriverà negli aggiornamenti successivi: per ora la pagina non modifica gli eventi esistenti.
+    </div>
+
+    <h3>Le categorie</h3>
+    <p>Dal pulsante <strong>🏷️ Categorie</strong> si gestiscono le categorie. Ognuna ha:</p>
+    <ul>
+        <li><strong>Colore</strong>, usato per riconoscerla nelle mappe;</li>
+        <li><strong>Come risulta il posto in mappa</strong>: <em>Abbonato</em> oppure <em>Riservato</em>;</li>
+        <li><strong>Durata</strong>: <em>per tutta la stagione</em> (vale fino alla fine della stagione scelta) oppure <em>permanente</em> (vale anche nelle stagioni successive, finché l'admin non la toglie);</li>
+        <li><strong>Priorità</strong>: se due categorie vogliono lo stesso posto vince quella con la priorità più alta;</li>
+        <li><strong>Promozione automatica</strong> (solo per le categorie permanenti): dopo un certo numero di partecipazioni allo stesso genere di evento. La regola viene salvata fin da ora ma sarà applicata in un prossimo aggiornamento.</li>
+    </ul>
+    <p>Le categorie iniziali, modificabili in qualsiasi momento, sono <strong>Abbonato</strong> (per tutta la stagione, posto «abbonato», priorità 30), <strong>Fedelissimo</strong> (permanente, posto «abbonato», promozione dopo 3 partecipazioni, priorità 20) e <strong>Vip</strong> (per tutta la stagione, posto «riservato», priorità 10). Non si può cambiare la durata di una categoria già usata da abbonati, né eliminarla: in quel caso si può <strong>disattivarla</strong>, così non è più proposta per i nuovi inserimenti.</p>
+
+    <h3>Inserire un abbonato</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <h4>Compila i dati</h4>
+            <p>Indica il <strong>nome della prenotazione</strong> (come comparirà sui posti), la <strong>categoria</strong>, il <strong>gestore</strong>, la <strong>stagione</strong> (solo per le categorie «per tutta la stagione»; per le permanenti non si indica), il <strong>genere di evento</strong> e la <strong>sala</strong>. Il genere può essere uno del gestore scelto oppure uno senza gestore.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <h4>Scegli i posti sulla mappa</h4>
+            <p>Appena i dati sono completi compare la <strong>mappa dei posti</strong>, costruita sul layout predefinito della sala (quello del genere, se c'è, altrimenti quello generico). Clicca sui posti liberi per selezionarli (diventano gialli); i posti già assegnati ad altri abbonati nella stessa stagione, genere e sala sono colorati con la loro categoria e non si possono scegliere (passando il mouse vedi di chi sono). <strong>Deseleziona tutti</strong> azzera la scelta.</p>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <h4>Salva</h4>
+            <p>Premi <strong>Salva abbonato</strong>: viene registrato un posto fisso per ogni posto selezionato.</p>
+        </div>
+    </div>
+    <div class="alert alert-info">
+        <strong>Un posto, un titolare:</strong> per la stessa combinazione di gestore, stagione, genere e sala un posto può appartenere a un solo abbonato. Se provi ad assegnarlo a due persone il sistema lo segnala e indica di chi è.
+    </div>
+    <div class="alert alert-info">
+        <strong>Il nome riconosce la persona:</strong> maiuscole, accenti, punteggiatura e spazi doppi non contano, quindi «CHILO' Gabriele» e «Chilo Gabriele» sono la stessa persona. Per unire due schede della stessa persona basta usare per entrambe lo stesso nome. Questo riconoscimento servirà per contare le partecipazioni dei fedelissimi.
+    </div>
+
+    <h3>L'elenco, i filtri e le azioni</h3>
+    <p>Sotto il modulo c'è l'elenco degli abbonati, con una riga per persona e categoria: nome, categoria, stagione (o «Permanente»), genere e sala, posti e <strong>stato</strong>. Si può cercare per nome e filtrare per gestore, stagione, genere, sala e categoria.</p>
+    <ul>
+        <li><strong>Modifica</strong>: riporta i dati nel modulo; si possono cambiare nome, categoria, stagione, genere, sala e aggiungere o togliere posti dalla mappa.</li>
+        <li><strong>Sospendi / Riattiva</strong>: sospende tutti i posti dell'abbonato senza cancellarli (stato «Sospeso»); servirà, quando sarà attivo il caricamento automatico, a non assegnare i suoi posti ai nuovi eventi. Lo stato «Parziale» indica che solo alcuni posti sono attivi.</li>
+        <li><strong>Elimina</strong>: rimuove l'abbonato e i suoi posti fissi, dopo conferma. Le prenotazioni già presenti sugli eventi non vengono toccate.</li>
+    </ul>
+    <div class="alert alert-warning">
+        <strong>Eliminazioni bloccate:</strong> un Gestore, una Stagione, un Genere o una Sala che hanno abbonati collegati non possono essere eliminati finché non elimini prima gli abbonati.
+    </div>
+</div>
+
 <div class="section" id="schema">
     <h2>🗄️ 4. Schema Database</h2>
     <p>L'applicazione utilizza PostgreSQL (Neon) con il seguente schema relazionale:</p>
@@ -1738,6 +1798,58 @@ source venv/bin/activate    (Linux/Mac)</pre>
 │ creato_da       │ INTEGER FK  │ No       │ -> utente.id                │
 │ data_creazione  │ DATETIME    │ No       │ Auto                        │
 └─────────────────┴─────────────┴──────────┴─────────────────────────────┘
+    </div>
+    <h3>Tabella <code>categoria_ripetitiva</code> <span style="font-weight:normal; font-size:0.8em;">(Gestione Abbonati)</span></h3>
+    <div class="schema-box">
+┌───────────────────────┬─────────────┬─────────┬─────────────────────────────────┐
+│ Campo                 │ Tipo        │ Obblig. │ Note                            │
+├───────────────────────┼─────────────┼─────────┼─────────────────────────────────┤
+│ id                    │ INTEGER PK  │ Sì      │ Auto-increment                  │
+│ nome                  │ VARCHAR(50) │ Sì      │ Univoco                         │
+│ colore                │ VARCHAR(7)  │ Sì      │ Esadecimale (#8b5cf6)           │
+│ stato_posto           │ VARCHAR(20) │ Sì      │ abbonato / riservato            │
+│ durata                │ VARCHAR(20) │ Sì      │ stagione / permanente           │
+│ promozione_automatica │ BOOLEAN     │ Sì      │ Fedelissimo automatico          │
+│ soglia_partecipazioni │ INTEGER     │ No      │ Es. 3                           │
+│ priorita              │ INTEGER     │ Sì      │ Più alta = vince                │
+│ attiva                │ BOOLEAN     │ Sì      │ Utilizzabile per nuovi abbonati │
+│ data_creazione        │ DATETIME    │ No      │ Auto                            │
+└───────────────────────┴─────────────┴─────────┴─────────────────────────────────┘
+    </div>
+    <h3>Tabella <code>prenotazioni_ripetitive</code> <span style="font-weight:normal; font-size:0.8em;">(Gestione Abbonati)</span></h3>
+    <div class="schema-box">
+┌───────────────────┬──────────────┬─────────┬───────────────────────────────────────────────────┐
+│ Campo             │ Tipo         │ Obblig. │ Note                                              │
+├───────────────────┼──────────────┼─────────┼───────────────────────────────────────────────────┤
+│ id                │ INTEGER PK   │ Sì      │ Auto-increment                                    │
+│ categoria_id      │ INTEGER FK   │ Sì      │ -> categoria_ripetitiva.id                        │
+│ gestore_id        │ INTEGER FK   │ Sì      │ -> gestore.id                                     │
+│ stagione_id       │ INTEGER FK   │ No      │ -> stagione.id (vuoto = permanente)               │
+│ genere_evento_id  │ INTEGER FK   │ Sì      │ -> genere_evento.id                               │
+│ sala_id           │ INTEGER FK   │ Sì      │ -> sala.id                                        │
+│ nome_prenotazione │ VARCHAR(150) │ Sì      │ Nome mostrato sui posti                           │
+│ persona_chiave    │ VARCHAR(150) │ Sì      │ Nome normalizzato (riconosce la persona)          │
+│ fila              │ VARCHAR(10)  │ Sì      │ Lettera (A, B, C...)                              │
+│ colonna           │ INTEGER      │ Sì      │ Numero colonna                                    │
+│ ripetibile        │ BOOLEAN      │ Sì      │ Interruttore (sospeso = falso)                    │
+│ origine           │ VARCHAR(30)  │ Sì      │ manuale / da_prenotazione / promozione_automatica │
+│ creato_da         │ INTEGER FK   │ No      │ -> utente.id                                      │
+│ data_creazione    │ DATETIME     │ No      │ Auto                                              │
+└───────────────────┴──────────────┴─────────┴───────────────────────────────────────────────────┘
+    <p style="font-size:0.85em; color:#666;">Una riga per posto. Un posto può avere un solo titolare per (gestore, stagione, genere, sala).</p>
+    </div>
+    <h3>Tabella <code>esclusione_ripetitiva</code> <span style="font-weight:normal; font-size:0.8em;">(Gestione Abbonati)</span></h3>
+    <div class="schema-box">
+┌────────────────┬────────────┬─────────┬───────────────────────────────┐
+│ Campo          │ Tipo       │ Obblig. │ Note                          │
+├────────────────┼────────────┼─────────┼───────────────────────────────┤
+│ id             │ INTEGER PK │ Sì      │ Auto-increment                │
+│ ripetitiva_id  │ INTEGER FK │ Sì      │ -> prenotazioni_ripetitive.id │
+│ evento_id      │ INTEGER FK │ Sì      │ -> evento.id                  │
+│ creato_da      │ INTEGER FK │ No      │ -> utente.id                  │
+│ data_creazione │ DATETIME   │ No      │ Auto                          │
+└────────────────┴────────────┴─────────┴───────────────────────────────┘
+    <p style="font-size:0.85em; color:#666;">Serve al caricamento automatico degli abbonati sugli eventi (in arrivo): ricorda i posti liberati solo per un evento.</p>
     </div>
     <h3>Tabella <code>sala</code></h3>
     <div class="schema-box">
@@ -1828,6 +1940,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
 │ nome_prenotazione   │ VARCHAR(150)│ No       │ Nome mostrato sui posti      │
 │ stato               │ VARCHAR(50) │ No       │ confermata / annullata / abbonata   │
 │ data_prenotazione   │ DATETIME    │ No       │ Auto                        │
+│ categoria_id        │ INTEGER FK  │ No       │ -> categoria_ripetitiva.id  │
 └─────────────────────┴─────────────┴──────────┴─────────────────────────────┘
     </div>
     <h3>Tabella <code>posto</code></h3>
@@ -1843,6 +1956,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
 │ colonna         │ INTEGER     │ Si'       │ Numero colonna              │
 │ stato           │ VARCHAR(20) │ No       │ libero/riservato/prenotato/abbonato │
 │ prenotazione_id │ INTEGER FK  │ No       │ -> prenotazione.id (nullable)│
+│ ripetitiva_id   │ INTEGER FK  │ No       │ -> prenotazioni_ripetitive.id│
 └─────────────────┴─────────────┴──────────┴─────────────────────────────┘
     </div>
     <h3>Tabella <code>google_connessione</code> <span style="font-weight:normal; font-size:0.8em;">(Fase B)</span></h3>
@@ -1891,6 +2005,9 @@ source venv/bin/activate    (Linux/Mac)</pre>
         <li><code>gestore</code> -> <code>sala</code> (1:N come default, opzionale, Fase C)</li>
         <li><code>gestore</code> -> <code>evento</code> (1:N, opzionale, Fase C)</li>
         <li><code>gestore</code> -> <code>stagione</code> (1:N, Gestione Stagione)</li>
+        <li><code>categoria_ripetitiva</code> -> <code>prenotazioni_ripetitive</code> (1:N, Gestione Abbonati)</li>
+        <li><code>stagione</code> -> <code>prenotazioni_ripetitive</code> (1:N, opzionale: vuota per le categorie permanenti)</li>
+        <li><code>prenotazioni_ripetitive</code> -> <code>posto</code> (1:N, quale ripetitiva ha originato il posto di un evento)</li>
     </ul>
 </div>
 
@@ -1992,6 +2109,8 @@ source venv/bin/activate    (Linux/Mac)</pre>
     <h3>v2.4 (2026)</h3>
     <ul>
         <li><strong>Nuovo:</strong> Gestione Stagioni (3.19) — anagrafica delle stagioni (nome, descrizione, gestore, data inizio e fine) con elenco filtrabile per gestore, stato (futura / in corso / conclusa) e numero di eventi del gestore nel periodo; nuova voce di menu "Stagioni" e nuova tabella <code>stagione</code> (4. Schema Database). Un gestore con stagioni collegate non puo' essere eliminato</li>
+        <li><strong>Nuovo:</strong> Gestione Abbonati (3.20) — categorie (Abbonato, Fedelissimo, Vip: durata per stagione o permanente, stato del posto, priorita', promozione automatica) e posti fissi degli abbonati con mappa di selezione, filtri, sospensione ed eliminazione; voce di menu "Abbonati"; nuove tabelle <code>categoria_ripetitiva</code>, <code>prenotazioni_ripetitive</code>, <code>esclusione_ripetitiva</code> e colonne <code>prenotazione.categoria_id</code> e <code>posto.ripetitiva_id</code>. Il caricamento automatico sugli eventi arrivera' nelle fasi successive. Gestori, stagioni, generi e sale con abbonati collegati non si possono eliminare</li>
+        <li><strong>Correzione:</strong> la conferma di eliminazione delle stagioni non funzionava se il nome conteneva un apostrofo</li>
     </ul>
 
     <h3>v2.3 (2026)</h3>

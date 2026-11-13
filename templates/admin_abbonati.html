@@ -1,0 +1,375 @@
+{% extends "base.html" %}
+{% block title %}Gestione Abbonati{% endblock %}
+{% block content %}
+<div class="admin-container">
+    <h2>👥 Gestione Abbonati</h2>
+    <p class="text-muted">Qui si gestiscono i posti fissi di abbonati, fedelissimi, vip... (le «prenotazioni ripetitive»): una persona, una categoria e i suoi posti, validi per tutti gli eventi di un certo genere in una sala. Il caricamento automatico sugli eventi sarà attivato in un prossimo aggiornamento.</p>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+        <a href="{{ url_for('admin_categorie_abbonati') }}" class="btn btn-outline">🏷️ Categorie</a>
+        <a href="{{ url_for('admin_stagioni') }}" class="btn btn-outline">📆 Stagioni</a>
+    </div>
+
+    {% if not gestori or not sale or not generi or not categorie %}
+    <div class="alert alert-warning">
+        Per inserire un abbonato servono almeno un
+        <a href="{{ url_for('admin_gestori') }}">Gestore</a>,
+        una <a href="{{ url_for('admin_sale') }}">Sala</a> (con layout predefinito),
+        un <a href="{{ url_for('admin_generi') }}">Genere</a>
+        e una <a href="{{ url_for('admin_categorie_abbonati') }}">Categoria</a>;
+        per le categorie «per tutta la stagione» anche una <a href="{{ url_for('admin_stagioni') }}">Stagione</a>.
+    </div>
+    {% endif %}
+
+    <div class="form-card">
+        <h3>{{ 'Modifica abbonato "' ~ iniziale.nome ~ '"' if in_modifica else 'Nuovo abbonato' }}</h3>
+        <form method="POST" action="{{ url_for('admin_abbonati_save') }}" id="formAbbonato">
+            {% if in_modifica %}<input type="hidden" name="gruppo_id" value="{{ iniziale.gruppo_id }}">{% endif %}
+
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Nome prenotazione *</label>
+                    <input type="text" name="nome_prenotazione" required maxlength="150" class="form-control"
+                           value="{{ iniziale.nome }}" placeholder="es. ROSSI Mario">
+                </div>
+                <div class="form-group col-6">
+                    <label>Categoria *</label>
+                    <select name="categoria_id" required class="form-control"></select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Gestore *</label>
+                    <select name="gestore_id" required class="form-control">
+                        <option value="">-- Seleziona --</option>
+                        {% for g in gestori %}
+                        <option value="{{ g.id }}" {% if iniziale.gestore_id == g.id %}selected{% endif %}>{{ g.ragione_sociale }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group col-6" id="rigaStagione">
+                    <label>Stagione *</label>
+                    <select name="stagione_id" class="form-control"></select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-6">
+                    <label>Genere di evento *</label>
+                    <select name="genere_id" required class="form-control"></select>
+                </div>
+                <div class="form-group col-6">
+                    <label>Sala *</label>
+                    <select name="sala_id" required class="form-control">
+                        <option value="">-- Seleziona --</option>
+                        {% for s in sale %}
+                        <option value="{{ s.id }}" {% if iniziale.sala_id == s.id %}selected{% endif %}>{{ s.nome }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Posti * <span id="contatorePosti" class="text-muted" style="font-weight:normal;"></span></label>
+                <div id="infoMappa" class="text-muted" style="margin-bottom:8px;"></div>
+                <div style="display:flex; gap:14px; flex-wrap:wrap; font-size:0.85em; margin-bottom:8px;">
+                    <span><span class="seat-color libero"></span> libero</span>
+                    <span><span class="seat-color selezione"></span> selezionato</span>
+                    <span><span class="seat-color abbonato"></span> già assegnato ad altri (colore della categoria)</span>
+                </div>
+                <div id="mappaPosti" class="seats-container" style="overflow-x:auto;"></div>
+                <input type="hidden" name="posti" value="">
+                <button type="button" id="btnDeseleziona" class="btn btn-sm btn-secondary" style="margin-top:8px;">Deseleziona tutti</button>
+            </div>
+
+            <button type="submit" class="btn btn-primary">{{ 'Salva Modifiche' if in_modifica else 'Salva abbonato' }}</button>
+            {% if in_modifica %}
+            <a href="{{ url_for('admin_abbonati') }}" class="btn btn-secondary">Annulla</a>
+            {% endif %}
+        </form>
+    </div>
+
+    <div class="prenotazioni-list">
+        <h3>Abbonati inseriti ({{ gruppi|length }})</h3>
+
+        <form method="GET" action="{{ url_for('admin_abbonati') }}" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
+            <input type="text" name="q" value="{{ filtri.q }}" placeholder="Cerca per nome..." class="form-control" style="width:200px;">
+            <select name="gestore_id" class="form-control" style="width:auto;">
+                <option value="">Tutti i gestori</option>
+                {% for g in gestori %}<option value="{{ g.id }}" {% if filtri.gestore_id == g.id %}selected{% endif %}>{{ g.ragione_sociale }}</option>{% endfor %}
+            </select>
+            <select name="stagione_id" class="form-control" style="width:auto;">
+                <option value="">Tutte le stagioni</option>
+                {% for s in stagioni %}<option value="{{ s.id }}" {% if filtri.stagione_id == s.id %}selected{% endif %}>{{ s.nome_stagione }}</option>{% endfor %}
+            </select>
+            <select name="genere_id" class="form-control" style="width:auto;">
+                <option value="">Tutti i generi</option>
+                {% for g in generi %}<option value="{{ g.id }}" {% if filtri.genere_id == g.id %}selected{% endif %}>{{ g.nome }}</option>{% endfor %}
+            </select>
+            <select name="sala_id" class="form-control" style="width:auto;">
+                <option value="">Tutte le sale</option>
+                {% for s in sale %}<option value="{{ s.id }}" {% if filtri.sala_id == s.id %}selected{% endif %}>{{ s.nome }}</option>{% endfor %}
+            </select>
+            <select name="categoria_id" class="form-control" style="width:auto;">
+                <option value="">Tutte le categorie</option>
+                {% for c in categorie %}<option value="{{ c.id }}" {% if filtri.categoria_id == c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
+            </select>
+            <button type="submit" class="btn btn-secondary">Filtra</button>
+            <a href="{{ url_for('admin_abbonati') }}" class="btn btn-outline">Azzera</a>
+        </form>
+
+        {% if gruppi %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Abbonato</th>
+                    <th>Categoria</th>
+                    <th>Stagione</th>
+                    <th>Genere / Sala</th>
+                    <th>Posti</th>
+                    <th>Stato</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for g in gruppi %}
+                <tr>
+                    <td><strong>{{ g.nome }}</strong><br><span class="text-muted" style="font-size:0.8em;">{{ g.gestore.ragione_sociale }}</span></td>
+                    <td>
+                        <span style="display:inline-block; padding:2px 8px; border-radius:10px; color:#fff; font-size:0.85em; background:{{ g.categoria.colore }};">{{ g.categoria.nome }}</span>
+                    </td>
+                    <td>{{ g.stagione.nome_stagione if g.stagione else 'Permanente' }}</td>
+                    <td>{{ g.genere.nome }}<br><span class="text-muted" style="font-size:0.8em;">{{ g.sala.nome }}</span></td>
+                    <td>{{ g.posti|join(', ') }} <span class="text-muted">({{ g.posti|length }})</span></td>
+                    <td>
+                        {% if g.stato == 'Attivo' %}<span style="color:#16a34a; font-weight:600;">Attivo</span>
+                        {% elif g.stato == 'Sospeso' %}<span class="text-muted">Sospeso</span>
+                        {% else %}<span style="color:#d97706; font-weight:600;">Parziale</span>{% endif %}
+                    </td>
+                    <td style="display:flex; gap:6px; flex-wrap:wrap;">
+                        <a href="{{ url_for('admin_abbonati', modifica=g.riga_id) }}" class="btn btn-sm btn-secondary">Modifica</a>
+                        <form method="POST" action="{{ url_for('admin_abbonati_toggle', riga_id=g.riga_id) }}" style="display:inline;">
+                            <button type="submit" class="btn btn-sm btn-secondary">{{ 'Riattiva' if g.stato == 'Sospeso' else 'Sospendi' }}</button>
+                        </form>
+                        <form method="POST" action="{{ url_for('admin_abbonati_delete', riga_id=g.riga_id) }}" style="display:inline;" onsubmit='return confirm({{ ("Eliminare l'abbonato \"" ~ g.nome ~ "\" e i suoi " ~ (g.posti|length) ~ " posti? Le prenotazioni già caricate sugli eventi non vengono toccate.")|tojson }});'>
+                            <button type="submit" class="btn btn-sm btn-danger">Elimina</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>Nessun abbonato trovato.</p>
+        {% endif %}
+    </div>
+
+    <a href="{{ url_for('calendar_view') }}" class="btn btn-outline">Torna al Calendario</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var DATI = {{ dati_form|tojson }};
+    var INIZ = {{ iniziale|tojson }};
+    var f = document.getElementById('formAbbonato');
+    if (!f) return;
+
+    var selGestore = f.elements['gestore_id'];
+    var selStagione = f.elements['stagione_id'];
+    var selGenere = f.elements['genere_id'];
+    var selSala = f.elements['sala_id'];
+    var selCategoria = f.elements['categoria_id'];
+    var inpPosti = f.elements['posti'];
+    var rigaStagione = document.getElementById('rigaStagione');
+    var mappa = document.getElementById('mappaPosti');
+    var infoMappa = document.getElementById('infoMappa');
+    var contatore = document.getElementById('contatorePosti');
+    var selezionati = new Set(INIZ.posti || []);
+    var richiesta = 0;
+
+    function riempi(sel, elementi, valore, testoVuoto, etichetta) {
+        sel.innerHTML = '';
+        var vuoto = document.createElement('option');
+        vuoto.value = '';
+        vuoto.textContent = testoVuoto;
+        sel.appendChild(vuoto);
+        elementi.forEach(function (e) {
+            var o = document.createElement('option');
+            o.value = e.id;
+            o.textContent = etichetta(e);
+            sel.appendChild(o);
+        });
+        sel.value = (valore !== null && valore !== undefined && valore !== '') ? String(valore) : '';
+    }
+    function intero(v) { var n = parseInt(v, 10); return isNaN(n) ? null : n; }
+    function categoriaCorrente() {
+        var id = intero(selCategoria.value);
+        return DATI.categorie.filter(function (c) { return c.id === id; })[0] || null;
+    }
+    function permanente() { var c = categoriaCorrente(); return !!c && c.durata === 'permanente'; }
+
+    function aggiornaCategorie() {
+        var corrente = intero(selCategoria.value);
+        if (corrente === null) corrente = INIZ.categoria_id;
+        var elenco = DATI.categorie.filter(function (c) { return c.attiva || c.id === corrente; });
+        riempi(selCategoria, elenco, corrente, '-- Seleziona --', function (c) { return c.nome + (c.durata === 'permanente' ? ' (permanente)' : ''); });
+    }
+    function aggiornaStagioni() {
+        var gid = intero(selGestore.value);
+        var corrente = intero(selStagione.value);
+        if (corrente === null) corrente = INIZ.stagione_id;
+        var elenco = DATI.stagioni.filter(function (s) { return s.gestore_id === gid; });
+        riempi(selStagione, elenco, corrente, '-- Seleziona --', function (s) { return s.nome + ' (' + s.periodo + ')'; });
+    }
+    function aggiornaGeneri() {
+        var gid = intero(selGestore.value);
+        var corrente = intero(selGenere.value);
+        if (corrente === null) corrente = INIZ.genere_id;
+        var elenco = DATI.generi.filter(function (g) { return g.gestore_id === null || g.gestore_id === gid; });
+        riempi(selGenere, elenco, corrente, '-- Seleziona --', function (g) { return g.nome + (g.gestore_id === null ? ' (senza gestore)' : ''); });
+    }
+    function aggiornaVisibilita() {
+        var perm = permanente();
+        rigaStagione.style.display = perm ? 'none' : '';
+        selStagione.required = !perm;
+    }
+    function aggiornaContatore() {
+        var n = selezionati.size;
+        contatore.textContent = n ? '(' + n + (n === 1 ? ' posto selezionato)' : ' posti selezionati)') : '';
+    }
+    function ordina(codici) {
+        return codici.sort(function (a, b) {
+            var fa = a.charAt(0), fb = b.charAt(0);
+            if (fa !== fb) return fa < fb ? -1 : 1;
+            return parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10);
+        });
+    }
+
+    function disegna(layout, occupati) {
+        var occ = {};
+        occupati.forEach(function (o) { occ[o.posto] = o; });
+        // i posti selezionati che non esistono piu' nel layout o sono gia' di altri vengono tolti
+        Array.from(selezionati).forEach(function (cod) {
+            var fila = cod.charCodeAt(0) - 64, col = parseInt(cod.slice(1), 10);
+            if (fila < 1 || fila > layout.file || col < 1 || col > layout.colonne || occ[cod]) selezionati.delete(cod);
+        });
+        var corrC = {}, corrF = {};
+        layout.corridoio_colonne.forEach(function (c) { corrC[c] = true; });
+        layout.corridoio_file.forEach(function (c) { corrF[c] = true; });
+
+        mappa.innerHTML = '';
+        var testa = document.createElement('div');
+        testa.className = 'seat-row';
+        var vuota = document.createElement('div');
+        vuota.className = 'row-label';
+        testa.appendChild(vuota);
+        for (var c = 1; c <= layout.colonne; c++) {
+            var l = document.createElement('div');
+            l.className = 'seat col-label';
+            l.textContent = c;
+            if (corrC[c]) l.style.marginRight = '14px';
+            testa.appendChild(l);
+        }
+        mappa.appendChild(testa);
+
+        for (var fi = 1; fi <= layout.file; fi++) {
+            var lettera = String.fromCharCode(64 + fi);
+            var riga = document.createElement('div');
+            riga.className = 'seat-row';
+            if (corrF[fi]) riga.style.marginBottom = '14px';
+            var etichetta = document.createElement('div');
+            etichetta.className = 'row-label';
+            etichetta.textContent = lettera;
+            riga.appendChild(etichetta);
+            for (var co = 1; co <= layout.colonne; co++) {
+                var codice = lettera + co;
+                var el = document.createElement('div');
+                el.setAttribute('data-posto', codice);
+                if (corrC[co]) el.style.marginRight = '14px';
+                if (occ[codice]) {
+                    var o = occ[codice];
+                    el.className = 'seat';
+                    el.style.background = o.colore;
+                    el.style.borderColor = o.colore;
+                    el.style.color = '#fff';
+                    el.style.cursor = 'not-allowed';
+                    el.style.fontSize = '0.6em';
+                    el.textContent = o.nome.substring(0, 6);
+                    el.title = codice + ' - ' + o.nome + ' (' + o.categoria + (o.sospeso ? ', sospeso' : '') + ')';
+                } else {
+                    el.className = 'seat ' + (selezionati.has(codice) ? 'selezione' : 'libero');
+                    el.textContent = co;
+                    el.title = codice;
+                    el.style.cursor = 'pointer';
+                    el.addEventListener('click', alterna);
+                }
+                riga.appendChild(el);
+            }
+            mappa.appendChild(riga);
+        }
+        aggiornaContatore();
+    }
+    function alterna(ev) {
+        var el = ev.currentTarget;
+        var cod = el.getAttribute('data-posto');
+        if (selezionati.has(cod)) {
+            selezionati.delete(cod);
+            el.className = 'seat libero';
+        } else {
+            selezionati.add(cod);
+            el.className = 'seat selezione';
+        }
+        aggiornaContatore();
+    }
+
+    function caricaMappa() {
+        var gestore = intero(selGestore.value), genere = intero(selGenere.value), sala = intero(selSala.value);
+        var stagione = intero(selStagione.value);
+        var perm = permanente();
+        mappa.innerHTML = '';
+        if (!(gestore && genere && sala && categoriaCorrente() && (perm || stagione))) {
+            infoMappa.textContent = 'Scegli categoria, gestore, ' + (perm ? '' : 'stagione, ') + 'genere e sala per vedere la mappa dei posti.';
+            aggiornaContatore();
+            return;
+        }
+        infoMappa.textContent = 'Caricamento della mappa...';
+        var url = '/api/abbonati/mappa?sala_id=' + sala + '&genere_id=' + genere + '&gestore_id=' + gestore +
+                  (perm ? '' : '&stagione_id=' + stagione) + (INIZ.gruppo_id ? '&escludi=' + INIZ.gruppo_id : '');
+        var mia = ++richiesta;
+        fetch(url)
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, dati: j }; }); })
+            .then(function (res) {
+                if (mia !== richiesta) return;
+                if (!res.ok) { infoMappa.textContent = res.dati.error || 'Impossibile caricare la mappa.'; return; }
+                infoMappa.textContent = 'Layout: ' + res.dati.layout.nome + ' (' + res.dati.layout.file + ' file x ' + res.dati.layout.colonne + ' colonne). Clicca sui posti liberi per selezionarli.';
+                disegna(res.dati.layout, res.dati.occupati);
+            })
+            .catch(function () { if (mia === richiesta) infoMappa.textContent = 'Errore di rete nel caricamento della mappa.'; });
+    }
+
+    selGestore.addEventListener('change', function () { aggiornaStagioni(); aggiornaGeneri(); caricaMappa(); });
+    selCategoria.addEventListener('change', function () { aggiornaVisibilita(); caricaMappa(); });
+    selStagione.addEventListener('change', caricaMappa);
+    selGenere.addEventListener('change', caricaMappa);
+    selSala.addEventListener('change', caricaMappa);
+    document.getElementById('btnDeseleziona').addEventListener('click', function () { selezionati.clear(); caricaMappa(); });
+    f.addEventListener('submit', function (ev) {
+        if (selezionati.size === 0) {
+            ev.preventDefault();
+            alert('Seleziona almeno un posto sulla mappa.');
+            return;
+        }
+        inpPosti.value = ordina(Array.from(selezionati)).join(',');
+    });
+
+    aggiornaCategorie();
+    aggiornaStagioni();
+    aggiornaGeneri();
+    aggiornaVisibilita();
+    caricaMappa();
+})();
+</script>
+{% endblock %}
