@@ -706,7 +706,8 @@ def booking_page(event_id):
     if ev.cancellato_google:
         flash("Questo evento è stato annullato (rimosso dal calendario Google di origine) e non è più prenotabile.", 'danger')
         return redirect(url_for('calendar_view'))
-    return render_template('booking.html', evento=ev)
+    ripetibile_info = _info_ripetibile_evento(ev) if current_user.is_admin() else None
+    return render_template('booking.html', evento=ev, ripetibile_info=ripetibile_info)
 
 
 @app.route('/api/seats/<int:event_id>')
@@ -751,6 +752,7 @@ def api_seats(event_id):
             item['utente_nome'] = p.prenotazione.utente.nome_cognome
             if current_user.is_admin():
                 item['utente'] = p.prenotazione.utente.nome_cognome
+                item['ripetitiva_id'] = p.ripetitiva_id
         else:
             item['is_mio'] = False
         result.append(item)
@@ -816,22 +818,129 @@ def api_book():
     return jsonify({'success': True, 'prenotazione_id': prenotazione.id})
 
 
-@app.route('/api/reserve', methods=['POST'])
-@login_required
-@limiter.limit("10 per minute")
-def api_reserve():
+# ------------------------------------------------------------------------------
+# GESTIONE ABBONATI - Fase 3: prenotazioni ripetibili dalla pagina di prenotazione
+# ------------------------------------------------------------------------------
+
+def _info_ripetibile_evento(evento):
+    """Dati per il modale «Ripetibile» della pagina di prenotazione (solo admin)."""
+    info = {'pronto': False, 'motivo': None, 'descrizione': '', 'categorie': [], 'stagioni': []}
+    if not evento.gestore_id or not evento.genere_evento_id:
+        info['motivo'] = "Per rendere ripetibile una prenotazione l'evento deve avere un Gestore e un Genere."
+        return info
+    info['pronto'] = True
+    info['descrizione'] = f"{evento.gestore.ragione_sociale} · {evento.genere.nome} · {evento.sala.nome}"
+    categorie = CategoriaRipetitiva.query.filter_by(attiva=True).order_by(
+        CategoriaRipetitiva.priorita.desc(), CategoriaRipetitiva.nome).all()
+    info['categorie'] = [
+        {'id': c.id, 'nome': c.nome, 'durata': c.durata, 'stato_posto': c.stato_posto, 'colore': c.colore}
+        for c in categorie
+    ]
+    # stagioni del gestore che comprendono la data dell'evento
+    stagioni = Stagione.query.filter(
+        Stagione.gestore_id == evento.gestore_id,
+        Stagione.data_inizio <= evento.data_evento,
+        Stagione.data_fine >= evento.data_evento
+    ).order_by(Stagione.data_inizio, Stagione.nome_stagione).all()
+    info['stagioni'] = [
+        {'id': s.id, 'nome': s.nome_stagione,
+         'periodo': f"{s.data_inizio.strftime('%d/%m/%Y')} - {s.data_fine.strftime('%d/%m/%Y')}"}
+        for s in stagioni
+    ]
+    return info
+
+
+def _valida_ripetibile_evento(evento, categoria_id, stagione_id, stato_atteso=None):
+    """Controlla categoria e stagione scelte per rendere ripetibile. Ritorna (categoria, stagione_id, errore)."""
+    if not evento.gestore_id or not evento.genere_evento_id:
+        return None, None, "Per rendere ripetibile una prenotazione l'evento deve avere un Gestore e un Genere."
+    categoria = db.session.get(CategoriaRipetitiva, categoria_id) if categoria_id else None
+    if not categoria or not categoria.attiva:
+        return None, None, 'Seleziona una categoria valida.'
+    if stato_atteso and categoria.stato_posto != stato_atteso:
+        pulsante = 'Abbona Posti' if categoria.stato_posto == 'abbonato' else 'Riserva Posti'
+        return None, None, (f"La categoria '{categoria.nome}' risulta «{categoria.stato_posto}»: "
+                            f"usa il pulsante {pulsante}.")
+    if categoria.durata == 'stagione':
+        stagione = db.session.get(Stagione, stagione_id) if stagione_id else None
+        if (not stagione or stagione.gestore_id != evento.gestore_id
+                or not (stagione.data_inizio <= evento.data_evento <= stagione.data_fine)):
+            return None, None, "Seleziona una stagione del gestore che comprenda la data dell'evento."
+        return categoria, stagione.id, None
+    return categoria, None, None   # categoria permanente: nessuna stagione
+
+
+def _crea_ripetitive_per_posti(evento, categoria, stagione_id, voci):
+    """voci: lista di (posto, nome). Crea una ripetitiva per posto e collega Posto.ripetitiva_id.
+    Se per quel posto esiste gia' la stessa persona con la stessa categoria, la ricollega.
+    Ritorna (create, ricollegate, conflitti): se ci sono conflitti nulla e' stato scritto e il chiamante deve annullare."""
+    esistenti = {
+        (r.fila, r.colonna): r for r in PrenotazioneRipetitiva.query.filter(
+            PrenotazioneRipetitiva.gestore_id == evento.gestore_id,
+            PrenotazioneRipetitiva.genere_evento_id == evento.genere_evento_id,
+            PrenotazioneRipetitiva.sala_id == evento.sala_id,
+            _filtro_stagione(stagione_id)
+        ).all()
+    }
+    nuove, ricollegate, conflitti = [], 0, []
+    for posto, nome in voci:
+        chiave = _normalizza_persona(nome)
+        riga = esistenti.get((posto.fila, posto.colonna))
+        if riga is not None:
+            if riga.persona_chiave == chiave and riga.categoria_id == categoria.id:
+                posto.ripetitiva_id = riga.id
+                ricollegate += 1
+            else:
+                conflitti.append(f"{posto.fila}{posto.colonna} ({riga.nome_prenotazione})")
+            continue
+        riga = PrenotazioneRipetitiva(
+            categoria_id=categoria.id, gestore_id=evento.gestore_id, stagione_id=stagione_id,
+            genere_evento_id=evento.genere_evento_id, sala_id=evento.sala_id,
+            nome_prenotazione=nome[:150], persona_chiave=chiave, fila=posto.fila, colonna=posto.colonna,
+            ripetibile=True, origine='da_prenotazione', creato_da=current_user.id
+        )
+        db.session.add(riga)
+        nuove.append((posto, riga))
+    if conflitti:
+        return 0, 0, conflitti
+    db.session.flush()
+    for posto, riga in nuove:
+        posto.ripetitiva_id = riga.id
+    return len(nuove), ricollegate, []
+
+
+def _riserva_o_abbona(tipo):
+    """Logica comune di api_reserve e api_abbona (solo admin), con la prenotazione ripetibile facoltativa."""
+    abbona = (tipo == 'abbona')
     if not current_user.is_admin():
-        return jsonify({'error': 'Solo gli amministratori possono riservare posti'}), 403
+        return jsonify({'error': 'Solo gli amministratori possono ' + ('abbonare' if abbona else 'riservare') + ' posti'}), 403
 
     data = request.get_json(silent=True) or {}
     evento_id = data.get('evento_id')
     posti_ids = data.get('posti_ids', [])
-    nome_prenotazione = data.get('nome_prenotazione', '').strip() or 'Riservato Admin'
+    nome_inserito = (data.get('nome_prenotazione') or '').strip()
+    ripetibile = data.get('ripetibile') if isinstance(data.get('ripetibile'), dict) else None
 
-    if not evento_id or not posti_ids:
+    if not evento_id or not posti_ids or not isinstance(posti_ids, list):
         return jsonify({'error': 'Dati mancanti'}), 400
+    nome_prenotazione = nome_inserito or ('Abbonato' if abbona else 'Riservato Admin')
+    stato_prenotazione = 'abbonata' if abbona else 'riservata'
+    stato_posto = 'abbonato' if abbona else 'riservato'
 
     try:
+        evento = db.session.get(Evento, evento_id)
+        if not evento:
+            return jsonify({'error': 'Evento non trovato'}), 404
+
+        categoria, stagione_id = None, None
+        if ripetibile:
+            if not nome_inserito or not _normalizza_persona(nome_inserito):
+                return jsonify({'error': 'Per una prenotazione ripetibile indica il nome della persona.'}), 400
+            categoria, stagione_id, errore = _valida_ripetibile_evento(
+                evento, ripetibile.get('categoria_id'), ripetibile.get('stagione_id'), stato_atteso=stato_posto)
+            if errore:
+                return jsonify({'error': errore}), 400
+
         posti = Posto.query.filter(
             Posto.id.in_(posti_ids),
             Posto.evento_id == evento_id,
@@ -846,67 +955,105 @@ def api_reserve():
             evento_id=evento_id,
             utente_id=current_user.id,
             nome_prenotazione=nome_prenotazione,
-            stato='riservata'
+            stato=stato_prenotazione,
+            categoria_id=categoria.id if categoria else None
         )
         db.session.add(prenotazione)
         db.session.flush()
 
         for p in posti:
-            p.stato = 'riservato'
+            p.stato = stato_posto
             p.prenotazione_id = prenotazione.id
 
+        ripetitive_create = 0
+        if categoria:
+            ripetitive_create, _ricollegate, conflitti = _crea_ripetitive_per_posti(
+                evento, categoria, stagione_id, [(p, nome_prenotazione) for p in posti])
+            if conflitti:
+                db.session.rollback()
+                return jsonify({'error': "Alcuni posti sono già assegnati ad altri abbonati fissi per questa stagione, "
+                                         "genere e sala: " + ', '.join(sorted(conflitti))}), 409
+
         db.session.commit()
-        return jsonify({'success': True, 'posti_riservati': len(posti), 'prenotazione_id': prenotazione.id})
+        return jsonify({
+            'success': True,
+            'posti_abbonati' if abbona else 'posti_riservati': len(posti),
+            'prenotazione_id': prenotazione.id,
+            'ripetitive_create': ripetitive_create
+        })
     except Exception as e:
         db.session.rollback()
-        app.logger.error(f'Errore riserva: {e}')
+        app.logger.error(f"Errore {'abbonamento' if abbona else 'riserva'}: {e}")
         return jsonify({'error': 'Errore interno'}), 500
+
+
+@app.route('/api/reserve', methods=['POST'])
+@login_required
+@limiter.limit("10 per minute")
+def api_reserve():
+    return _riserva_o_abbona('reserve')
 
 
 @app.route('/api/abbona', methods=['POST'])
 @login_required
 @limiter.limit("10 per minute")
 def api_abbona():
+    return _riserva_o_abbona('abbona')
+
+
+@app.route('/api/rendi-ripetibili', methods=['POST'])
+@login_required
+@limiter.limit("10 per minute")
+def api_rendi_ripetibili():
+    """Strumento una tantum: rende ripetibili i posti gia' assegnati di un evento esistente.
+    Ogni posto diventa un posto fisso con il nome della sua prenotazione."""
     if not current_user.is_admin():
-        return jsonify({'error': 'Solo gli amministratori possono abbonare posti'}), 403
+        return jsonify({'error': 'Solo gli amministratori possono rendere ripetibili i posti'}), 403
 
     data = request.get_json(silent=True) or {}
     evento_id = data.get('evento_id')
     posti_ids = data.get('posti_ids', [])
-    nome_prenotazione = data.get('nome_prenotazione', '').strip() or 'Abbonato'
-
-    if not evento_id or not posti_ids:
+    if not evento_id or not posti_ids or not isinstance(posti_ids, list):
         return jsonify({'error': 'Dati mancanti'}), 400
 
     try:
-        posti = Posto.query.filter(
-            Posto.id.in_(posti_ids),
-            Posto.evento_id == evento_id,
-            Posto.stato == 'libero'
-        ).all()
+        evento = db.session.get(Evento, evento_id)
+        if not evento:
+            return jsonify({'error': 'Evento non trovato'}), 404
+        categoria, stagione_id, errore = _valida_ripetibile_evento(
+            evento, data.get('categoria_id'), data.get('stagione_id'))
+        if errore:
+            return jsonify({'error': errore}), 400
 
-        if len(posti) != len(posti_ids):
+        posti = Posto.query.filter(Posto.id.in_(posti_ids), Posto.evento_id == evento_id).all()
+        if len(posti) != len(set(posti_ids)):
+            return jsonify({'error': 'Alcuni posti non appartengono a questo evento'}), 400
+
+        voci, prenotazioni = [], {}
+        for p in sorted(posti, key=lambda x: (x.fila, x.colonna)):
+            pren = p.prenotazione
+            if not pren:
+                return jsonify({'error': f"Il posto {p.fila}{p.colonna} non ha una prenotazione."}), 400
+            if p.ripetitiva_id:
+                return jsonify({'error': f"Il posto {p.fila}{p.colonna} è già ripetibile."}), 400
+            nome = (pren.nome_prenotazione or pren.utente.nome_cognome or '').strip()
+            if not _normalizza_persona(nome):
+                return jsonify({'error': f"Il posto {p.fila}{p.colonna} non ha un nome utilizzabile."}), 400
+            voci.append((p, nome))
+            prenotazioni[pren.id] = pren
+
+        create, ricollegate, conflitti = _crea_ripetitive_per_posti(evento, categoria, stagione_id, voci)
+        if conflitti:
             db.session.rollback()
-            return jsonify({'error': "Alcuni posti non sono piu' disponibili"}), 409
-
-        prenotazione = Prenotazione(
-            evento_id=evento_id,
-            utente_id=current_user.id,
-            nome_prenotazione=nome_prenotazione,
-            stato='abbonata'
-        )
-        db.session.add(prenotazione)
-        db.session.flush()
-
-        for p in posti:
-            p.stato = 'abbonato'
-            p.prenotazione_id = prenotazione.id
-
+            return jsonify({'error': "Alcuni posti sono già assegnati ad altri abbonati fissi per questa stagione, "
+                                     "genere e sala: " + ', '.join(sorted(conflitti))}), 409
+        for pren in prenotazioni.values():
+            pren.categoria_id = categoria.id
         db.session.commit()
-        return jsonify({'success': True, 'posti_abbonati': len(posti), 'prenotazione_id': prenotazione.id})
+        return jsonify({'success': True, 'ripetitive_create': create, 'ricollegate': ricollegate})
     except Exception as e:
         db.session.rollback()
-        app.logger.error(f'Errore abbonamento: {e}')
+        app.logger.error(f'Errore rendi-ripetibili: {e}')
         return jsonify({'error': 'Errore interno'}), 500
 
 

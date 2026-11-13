@@ -1388,6 +1388,25 @@ source venv/bin/activate    (Linux/Mac)</pre>
         </div>
     </div>
 
+    <h3>Rendere l'abbonamento «ripetibile»</h3>
+    <p>Nel riquadro del nome, subito dopo averlo scritto, compare la spunta <strong>Ripetibile: posto fisso anche per i prossimi eventi di questo genere</strong>. Se la selezioni, oltre alla prenotazione di questo evento vengono registrati i <strong>posti fissi</strong> della persona in <a href="#admin-abbonati">Gestione Abbonati</a> (un posto fisso per ogni posto selezionato). Compaiono due scelte:</p>
+    <ul>
+        <li><strong>Categoria</strong>: sono proposte solo quelle coerenti con il pulsante usato (con «Abbona Posti» le categorie il cui posto risulta «abbonato», con «Riserva Posti» quelle «riservato»).</li>
+        <li><strong>Stagione</strong>: sono elencate le stagioni del Gestore dell'evento che comprendono la data dell'evento, e se ce n'è una sola è già scelta. Per le categorie permanenti la stagione non serve. Se nessuna stagione comprende la data, il riquadro lo segnala: crea la stagione da <a href="#admin-stagioni">Stagioni</a> oppure scegli una categoria permanente.</li>
+    </ul>
+    <div class="alert alert-info">
+        <strong>Il nome deve essere quello della persona:</strong> con la spunta attiva il nome non può restare vuoto né uguale al tuo (altrimenti verrebbe registrato come posto fisso dell'admin). L'evento deve avere un <strong>Gestore</strong> e un <strong>Genere</strong>: se mancano, la spunta spiega perché non è disponibile. Se uno dei posti è già assegnato a un'altra persona per la stessa stagione, genere e sala, l'operazione viene annullata e il messaggio indica quale posto.
+    </div>
+    <p>I posti di questo evento restano collegati al loro posto fisso e sono contrassegnati dal simbolo <strong>↻</strong> in alto a destra sul posto (visibile agli admin).</p>
+
+    <h3>Rendere ripetibili posti già assegnati (strumento una tantum)</h3>
+    <p>Per partire da un evento già pieno, senza reinserire tutto a mano, nella pagina di prenotazione dell'evento:</p>
+    <ul>
+        <li><strong>1.</strong> premi <strong>☑️ Seleziona assegnati</strong> per selezionare in un colpo tutti i posti già assegnati che non sono ancora ripetibili (diventano rossi); poi togli con un clic quelli che non vuoi, per esempio i posti bloccati. In alternativa seleziona i posti uno per uno;</li>
+        <li><strong>2.</strong> premi <strong>♻️ Rendi ripetibili</strong>, scegli <strong>categoria</strong> e <strong>stagione</strong> e conferma.</li>
+    </ul>
+    <p>Ogni posto diventa un posto fisso con il <strong>nome della sua prenotazione</strong>, nella categoria scelta (la stessa per tutti i posti selezionati). La prenotazione resta com'è. I posti già ripetibili non si possono selezionare per questa operazione.</p>
+
     <h3>Cancellare posti abbonato</h3>
     <p>Gli admin possono cancellare i posti abbonato cliccandoli (apparirà l'animazione rossa di selezione per cancellazione) e poi premendo <strong>🗑️ Cancella Selezionati</strong>.</p>
 
@@ -1431,6 +1450,9 @@ source venv/bin/activate    (Linux/Mac)</pre>
     </div>
     <div class="alert alert-info">
         <strong>Nota:</strong> i posti riservati sono visibili a tutti gli utenti in <strong>arancione</strong> e non sono prenotabili dagli utenti normali. Solo un admin può cancellarli (vedi sezione successiva).
+    </div>
+    <div class="alert alert-info">
+        <strong>Ripetibile:</strong> anche la riserva può essere resa «ripetibile» (per esempio per una categoria Vip il cui posto risulta riservato): vedi la spunta descritta nella sezione <a href="#admin-abbonato">3.12</a>.
     </div>
 </div>
 
@@ -1693,7 +1715,7 @@ source venv/bin/activate    (Linux/Mac)</pre>
     <h2><span class="badge badge-admin">Admin</span> 3.20 Gestione Abbonati</h2>
     <p>La <strong>Gestione Abbonati</strong> serve a registrare i <strong>posti fissi</strong> di abbonati, fedelissimi, vip e simili (le «prenotazioni ripetitive»): una persona, una <em>categoria</em> e i suoi posti, validi per tutti gli eventi di un certo <strong>genere</strong> in una <strong>sala</strong>, per un <strong>Gestore</strong> e, di norma, per una <a href="#admin-stagioni">Stagione</a>. Si apre dalla voce <strong>👥 Abbonati</strong> del menu in alto.</p>
     <div class="alert alert-info">
-        <strong>Stato dell'aggiornamento:</strong> in questa versione si registrano e si gestiscono gli abbonati. Il <strong>caricamento automatico</strong> dei loro posti sugli eventi (alla creazione di un evento, all'importazione da Google Calendar o con un pulsante) arriverà negli aggiornamenti successivi: per ora la pagina non modifica gli eventi esistenti.
+        <strong>Stato dell'aggiornamento:</strong> gli abbonati si registrano da questa pagina oppure direttamente dalla pagina di prenotazione con la spunta <strong>Ripetibile</strong> (vedi <a href="#admin-abbonato">3.12</a>), anche partendo da un evento già pieno con <strong>♻️ Rendi ripetibili</strong>. Il <strong>caricamento automatico</strong> dei loro posti sui nuovi eventi (alla creazione di un evento, all'importazione da Google Calendar o con un pulsante) arriverà negli aggiornamenti successivi: per ora questa pagina non modifica gli eventi esistenti.
     </div>
 
     <h3>Le categorie</h3>
@@ -2110,6 +2132,8 @@ source venv/bin/activate    (Linux/Mac)</pre>
     <ul>
         <li><strong>Nuovo:</strong> Gestione Stagioni (3.19) — anagrafica delle stagioni (nome, descrizione, gestore, data inizio e fine) con elenco filtrabile per gestore, stato (futura / in corso / conclusa) e numero di eventi del gestore nel periodo; nuova voce di menu "Stagioni" e nuova tabella <code>stagione</code> (4. Schema Database). Un gestore con stagioni collegate non puo' essere eliminato</li>
         <li><strong>Nuovo:</strong> Gestione Abbonati (3.20) — categorie (Abbonato, Fedelissimo, Vip: durata per stagione o permanente, stato del posto, priorita', promozione automatica) e posti fissi degli abbonati con mappa di selezione, filtri, sospensione ed eliminazione; voce di menu "Abbonati"; nuove tabelle <code>categoria_ripetitiva</code>, <code>prenotazioni_ripetitive</code>, <code>esclusione_ripetitiva</code> e colonne <code>prenotazione.categoria_id</code> e <code>posto.ripetitiva_id</code>. Il caricamento automatico sugli eventi arrivera' nelle fasi successive. Gestori, stagioni, generi e sale con abbonati collegati non si possono eliminare</li>
+        <li><strong>Nuovo:</strong> Posti Abbonato e Riservare Posti (3.12, 3.13) — spunta "Ripetibile" nel riquadro del nome (categoria e stagione, proposta in automatico dalla data dell'evento) che registra i posti fissi in Gestione Abbonati; strumento "Seleziona assegnati" + "Rendi ripetibili" per partire da un evento gia' pieno; simbolo ↻ sui posti collegati a un posto fisso</li>
+        <li><strong>Correzione:</strong> «Abbona Posti» ora blocca i posti durante il salvataggio come «Riserva Posti» (prima due admin contemporanei potevano assegnare lo stesso posto); il messaggio mostrato durante l'invio era sempre quello della riserva</li>
         <li><strong>Correzione:</strong> la conferma di eliminazione delle stagioni non funzionava se il nome conteneva un apostrofo</li>
     </ul>
 

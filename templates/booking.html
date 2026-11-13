@@ -204,6 +204,13 @@
     .btn-edit:hover { background: #2980b9; }
     .modal-box .check-row { display: flex; align-items: center; gap: 8px; margin-bottom: 15px; font-size: 0.95em; color: #444; }
     .modal-box .check-row input[type=checkbox] { width: auto; padding: 0; margin: 0; flex-shrink: 0; }
+    .modal-box select { width: 100%; padding: 10px; border: 2px solid #e2e8f0; border-radius: 8px; margin-bottom: 10px; font-size: 1em; background: #fff; }
+    .modal-box label.campo { display: block; text-align: left; font-size: 0.9em; color: #444; margin-bottom: 4px; }
+    .rip-box { text-align: left; border-top: 1px solid #e2e8f0; margin-top: 4px; padding-top: 12px; margin-bottom: 14px; }
+    .rip-desc { font-size: 0.85em; color: #64748b; margin: 0 0 8px; }
+    .rip-msg { font-size: 0.85em; color: #b45309; margin: 0 0 8px; }
+    .seat.rip { position: relative; }
+    .seat.rip::after { content: '\21BB'; position: absolute; top: 1px; right: 3px; font-size: 0.75em; line-height: 1; }
 
     /* ===== MEDIA QUERY MOBILE ===== */
     @media (max-width: 480px) {
@@ -262,6 +269,13 @@
         <button id="btn-abbona" class="btn" style="background:#8b5cf6;color:white;" disabled onclick="conferma('abbona')">
             🎫 Abbona Posti
         </button>
+        <button id="btn-sel-assegnati" class="btn btn-secondary" onclick="selezionaAssegnati()"
+                title="Seleziona tutti i posti già assegnati che non sono ancora ripetibili">
+            ☑️ Seleziona assegnati
+        </button>
+        <button id="btn-rendi-rip" class="btn" style="background:#0f766e;color:white;" disabled onclick="apriRendiRip()">
+            ♻️ Rendi ripetibili
+        </button>
         {% endif %}
         <button id="btn-rinomina" class="btn btn-edit" disabled onclick="apriRinomina()">
             ✏️ Modifica nome
@@ -284,12 +298,51 @@
     <div class="modal-box">
         <h3 id="modal-titolo">Nome della prenotazione</h3>
         <input type="text" id="input-nome" placeholder="Es. Mario Rossi" maxlength="50">
+        {% if current_user.is_admin() %}
+        <div id="rip-blocco" class="rip-box" style="display:none;">
+            <label class="check-row">
+                <input type="checkbox" id="chk-ripetibile">
+                Ripetibile: posto fisso anche per i prossimi eventi di questo genere
+            </label>
+            <div id="rip-campi" style="display:none;">
+                <p id="rip-desc" class="rip-desc"></p>
+                <label class="campo">Categoria</label>
+                <select id="rip-cat"></select>
+                <div id="rip-stag-riga">
+                    <label class="campo">Stagione</label>
+                    <select id="rip-stag"></select>
+                </div>
+                <p id="rip-msg" class="rip-msg"></p>
+            </div>
+        </div>
+        {% endif %}
         <div class="modal-actions">
             <button class="btn-cancel" onclick="chiudiModal()">Annulla</button>
             <button class="btn-confirm" onclick="eseguiAzione()">Conferma</button>
         </div>
     </div>
 </div>
+
+{% if current_user.is_admin() %}
+<div id="modal-rendi-rip" class="modal-overlay">
+    <div class="modal-box">
+        <h3>Rendi ripetibili i posti selezionati</h3>
+        <p id="rr-intro" class="rip-desc"></p>
+        <p id="rr-desc" class="rip-desc"></p>
+        <label class="campo">Categoria</label>
+        <select id="rr-cat"></select>
+        <div id="rr-stag-riga">
+            <label class="campo">Stagione</label>
+            <select id="rr-stag"></select>
+        </div>
+        <p id="rr-msg" class="rip-msg"></p>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="chiudiRendiRip()">Annulla</button>
+            <button class="btn-confirm" onclick="eseguiRendiRip()">Conferma</button>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 <div id="modal-rinomina" class="modal-overlay">
     <div class="modal-box">
@@ -310,6 +363,7 @@
 const EVENTO_ID = {{ evento.id }};
 const IS_ADMIN = {{ 'true' if current_user.is_admin() else 'false' }};
 const CURRENT_USER_ID = {{ current_user.id }};
+const RIP = {{ ripetibile_info|tojson if ripetibile_info else 'null' }};
 const DEFAULT_NAME = "{{ current_user.nome_cognome }}";
 let selectedSeats = [];
 let selectedToDelete = [];
@@ -440,7 +494,9 @@ function renderSeats(posti) {
                 label = `<div class="nome-pren">${escapeHtml(nome)}</div>`;
             }
 
-            html += `<div class="seat ${cls}" data-id="${p.id}" data-stato="${p.stato}" data-canc="${cancellabile}" data-clic="${cliccabile}" data-pren="${p.prenotazione_id || ''}" data-edit="${modificabile}" data-nome="${escapeHtml(p.nome_prenotazione || '')}">
+            const rip = IS_ADMIN && p.ripetitiva_id ? p.ripetitiva_id : '';
+
+            html += `<div class="seat ${cls}${rip ? ' rip' : ''}" data-id="${p.id}" data-stato="${p.stato}" data-canc="${cancellabile}" data-clic="${cliccabile}" data-pren="${p.prenotazione_id || ''}" data-edit="${modificabile}" data-rip="${rip}" data-nome="${escapeHtml(p.nome_prenotazione || '')}">
                 <div>${p.fila}${p.colonna}</div>
                 ${label}
             </div>`;
@@ -524,6 +580,17 @@ function updateButtons() {
         });
         btnRinomina.disabled = !(ok && pren.size === 1);
     }
+
+    const btnRendi = document.getElementById('btn-rendi-rip');
+    if (btnRendi) {
+        let ok = selectedToDelete.length > 0 && !!RIP && RIP.pronto;
+        selectedToDelete.forEach(id => {
+            const s = document.querySelector(`#seats-container [data-id="${id}"]`);
+            if (!s || !s.dataset.pren || s.dataset.rip) ok = false;
+        });
+        btnRendi.disabled = !ok;
+        btnRendi.title = (RIP && !RIP.pronto) ? RIP.motivo : '';
+    }
 }
 
 function conferma(tipo) {
@@ -535,6 +602,17 @@ function conferma(tipo) {
     else titolo = 'Nome della riserva';
     document.getElementById('modal-titolo').textContent = titolo;
     document.getElementById('input-nome').value = DEFAULT_NAME;
+    var blocco = document.getElementById('rip-blocco');
+    if (blocco) {
+        document.getElementById('chk-ripetibile').checked = false;
+        document.getElementById('rip-campi').style.display = 'none';
+        if (tipo === 'book') {
+            blocco.style.display = 'none';
+        } else {
+            blocco.style.display = '';
+            preparaRip('rip', tipo === 'abbona' ? 'abbonato' : 'riservato');
+        }
+    }
     document.getElementById('modal-nome').classList.add('active');
     document.getElementById('input-nome').focus();
 }
@@ -588,31 +666,176 @@ function nascondiInvio() {
 }
 
 function eseguiAzione() {
-    const nome = document.getElementById('input-nome').value.trim() || DEFAULT_NAME;
-    var url;
-    if (azioneCorrente === 'book') url = '/api/book';
-    else if (azioneCorrente === 'abbona') url = '/api/abbona';
-    else url = '/api/reserve';
+    const tipo = azioneCorrente;
+    const nomeInserito = document.getElementById('input-nome').value.trim();
+    const nome = nomeInserito || DEFAULT_NAME;
+
+    // prenotazione ripetibile (solo admin, solo Riserva/Abbona)
+    var rip = null;
+    var chk = document.getElementById('chk-ripetibile');
+    if (IS_ADMIN && tipo !== 'book' && chk && chk.checked) {
+        if (!nomeInserito || nomeInserito === DEFAULT_NAME) {
+            alert('Per una prenotazione ripetibile indica il nome della persona (non il tuo).');
+            return;
+        }
+        rip = leggiRip('rip');
+        if (!rip) return;
+    }
+
+    var url, msgInvio;
+    if (tipo === 'book') { url = '/api/book'; msgInvio = 'Invio prenotazione in corso...'; }
+    else if (tipo === 'abbona') { url = '/api/abbona'; msgInvio = 'Invio abbonamento in corso...'; }
+    else { url = '/api/reserve'; msgInvio = 'Invio riserva in corso...'; }
 
     chiudiModal();
-    var msgInvio;
-    if (azioneCorrente === 'book') msgInvio = 'Invio prenotazione in corso...';
-    else if (azioneCorrente === 'abbona') msgInvio = 'Invio abbonamento in corso...';
-    else msgInvio = 'Invio riserva in corso...';
     mostraInvio(msgInvio);
 
     fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ evento_id: EVENTO_ID, posti_ids: selectedSeats, nome_prenotazione: nome })
+        body: JSON.stringify({ evento_id: EVENTO_ID, posti_ids: selectedSeats, nome_prenotazione: nome, ripetibile: rip })
     })
     .then(r => r.json())
     .then(data => {
-        if (data.success) { window.location.reload(); }
+        if (data.success) {
+            if (data.ripetitive_create) { alert('Salvato. Creati ' + data.ripetitive_create + ' posti fissi ripetibili.'); }
+            window.location.reload();
+        }
         else { nascondiInvio(); alert(data.error || 'Errore'); loadSeats(); }
     })
     .catch(() => { nascondiInvio(); alert('Errore di rete'); loadSeats(); });
 }
+
+/* ---- Prenotazioni ripetibili (Gestione Abbonati) ---- */
+function riempiSel(sel, elementi, testoVuoto, etichetta) {
+    sel.innerHTML = '';
+    var v = document.createElement('option');
+    v.value = '';
+    v.textContent = testoVuoto;
+    sel.appendChild(v);
+    elementi.forEach(function (e) {
+        var o = document.createElement('option');
+        o.value = e.id;
+        o.textContent = etichetta(e);
+        sel.appendChild(o);
+    });
+}
+
+function categoriaSel(p) {
+    var id = parseInt(document.getElementById(p + '-cat').value, 10);
+    return (RIP && RIP.categorie.filter(function (c) { return c.id === id; })[0]) || null;
+}
+
+function preparaRip(p, stato) {
+    var cat = document.getElementById(p + '-cat'), stag = document.getElementById(p + '-stag');
+    var msg = document.getElementById(p + '-msg'), desc = document.getElementById(p + '-desc');
+    msg.textContent = '';
+    if (!RIP || !RIP.pronto) {
+        desc.textContent = '';
+        msg.textContent = RIP ? RIP.motivo : '';
+        riempiSel(cat, [], '--', function () { return ''; });
+        riempiSel(stag, [], '--', function () { return ''; });
+        return;
+    }
+    desc.textContent = RIP.descrizione;
+    var cats = RIP.categorie.filter(function (c) { return !stato || c.stato_posto === stato; });
+    riempiSel(cat, cats, '-- Seleziona --', function (c) { return c.nome + (c.durata === 'permanente' ? ' (permanente)' : ''); });
+    if (cats.length === 1) cat.value = String(cats[0].id);
+    riempiSel(stag, RIP.stagioni, '-- Seleziona --', function (s) { return s.nome + ' (' + s.periodo + ')'; });
+    if (RIP.stagioni.length === 1) stag.value = String(RIP.stagioni[0].id);
+    if (cats.length === 0) {
+        msg.textContent = 'Nessuna categoria attiva' + (stato ? ' con posto «' + stato + '»' : '') + ': creala da Categorie Abbonati.';
+    }
+    aggiornaRip(p);
+}
+
+function aggiornaRip(p) {
+    var cat = categoriaSel(p);
+    var riga = document.getElementById(p + '-stag-riga'), msg = document.getElementById(p + '-msg');
+    var perm = !!cat && cat.durata === 'permanente';
+    riga.style.display = perm ? 'none' : '';
+    if (!RIP || !RIP.pronto) return;
+    if (cat && !perm && RIP.stagioni.length === 0) {
+        msg.textContent = "Nessuna stagione del gestore comprende la data dell'evento: creala da Stagioni, oppure scegli una categoria permanente.";
+    } else if (msg.textContent.indexOf('Nessuna stagione') === 0) {
+        msg.textContent = '';
+    }
+}
+
+function leggiRip(p) {
+    if (!RIP || !RIP.pronto) { alert(RIP ? RIP.motivo : 'Funzione non disponibile.'); return null; }
+    var cat = categoriaSel(p);
+    if (!cat) { alert('Seleziona la categoria.'); return null; }
+    var stagione = null;
+    if (cat.durata !== 'permanente') {
+        var v = parseInt(document.getElementById(p + '-stag').value, 10);
+        if (isNaN(v)) { alert('Seleziona la stagione (o scegli una categoria permanente).'); return null; }
+        stagione = v;
+    }
+    return { categoria_id: cat.id, stagione_id: stagione };
+}
+
+function selezionaAssegnati() {
+    document.querySelectorAll('#seats-container .seat').forEach(function (el) {
+        if (el.dataset.canc === 'true' && el.dataset.pren && !el.dataset.rip && !el.classList.contains('selezionato-canc')) {
+            toggleSeat(el);
+        }
+    });
+}
+
+function apriRendiRip() {
+    if (!selectedToDelete.length) return;
+    var nomi = new Set();
+    selectedToDelete.forEach(function (id) {
+        var el = document.querySelector('#seats-container [data-id="' + id + '"]');
+        if (el) nomi.add(el.dataset.nome);
+    });
+    document.getElementById('rr-intro').textContent = selectedToDelete.length + (selectedToDelete.length === 1 ? ' posto' : ' posti') +
+        ' di ' + nomi.size + (nomi.size === 1 ? ' prenotazione' : ' prenotazioni') +
+        ': ogni posto diventa un posto fisso con il nome della sua prenotazione.';
+    preparaRip('rr', null);
+    document.getElementById('modal-rendi-rip').classList.add('active');
+}
+
+function chiudiRendiRip() {
+    document.getElementById('modal-rendi-rip').classList.remove('active');
+}
+
+function eseguiRendiRip() {
+    var rip = leggiRip('rr');
+    if (!rip) return;
+    var ids = selectedToDelete.slice();
+    chiudiRendiRip();
+    mostraInvio('Salvataggio in corso...');
+    fetch('/api/rendi-ripetibili', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ evento_id: EVENTO_ID, posti_ids: ids, categoria_id: rip.categoria_id, stagione_id: rip.stagione_id })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            alert('Fatto: ' + data.ripetitive_create + ' posti fissi creati' + (data.ricollegate ? ', ' + data.ricollegate + ' già presenti ricollegati' : '') + '.');
+            window.location.reload();
+        } else { nascondiInvio(); alert(data.error || 'Errore'); loadSeats(); }
+    })
+    .catch(() => { nascondiInvio(); alert('Errore di rete'); loadSeats(); });
+}
+
+(function () {
+    var chk = document.getElementById('chk-ripetibile');
+    var campi = document.getElementById('rip-campi');
+    var nome = document.getElementById('input-nome');
+    if (chk && campi) {
+        chk.addEventListener('change', function () {
+            campi.style.display = chk.checked ? '' : 'none';
+            if (chk.checked && nome.value.trim() === DEFAULT_NAME) { nome.value = ''; nome.placeholder = 'Nome della persona'; nome.focus(); }
+        });
+    }
+    var rc = document.getElementById('rip-cat'), rr = document.getElementById('rr-cat');
+    if (rc) rc.addEventListener('change', function () { aggiornaRip('rip'); });
+    if (rr) rr.addEventListener('change', function () { aggiornaRip('rr'); });
+})();
 
 document.getElementById('input-nome').addEventListener('keypress', function(e) {
     if (e.key === 'Enter') eseguiAzione();
