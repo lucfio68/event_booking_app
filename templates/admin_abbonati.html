@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Gestione Abbonati{% endblock %}
+{% block title %}Gestione Posti Riservati{% endblock %}
 {% block content %}
 <div class="admin-container">
-    <h2>👥 Gestione Abbonati</h2>
-    <p class="text-muted">Qui si gestiscono i posti fissi di abbonati, fedelissimi, vip... (le «prenotazioni ripetitive»): una persona, una categoria e i suoi posti, validi per tutti gli eventi di un certo genere in una sala. Il caricamento automatico sugli eventi sarà attivato in un prossimo aggiornamento.</p>
+    <h2>👥 Gestione Posti Riservati</h2>
+    <p class="text-muted">Qui si gestiscono i <strong>posti riservati ripetibili</strong> (per abbonati, fedelissimi, vip... secondo le categorie che definisci): una persona, una categoria e i suoi posti, validi per tutti gli eventi di un certo genere in una sala. I posti vengono caricati sui nuovi eventi in automatico, oppure con il pulsante «Carica posti riservati» nella gestione dell'evento.</p>
 
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
         <a href="{{ url_for('admin_categorie_abbonati') }}" class="btn btn-outline">🏷️ Categorie</a>
@@ -12,7 +12,7 @@
 
     {% if not gestori or not sale or not generi or not categorie %}
     <div class="alert alert-warning">
-        Per inserire un abbonato servono almeno un
+        Per inserire dei posti riservati servono almeno un
         <a href="{{ url_for('admin_gestori') }}">Gestore</a>,
         una <a href="{{ url_for('admin_sale') }}">Sala</a> (con layout predefinito),
         un <a href="{{ url_for('admin_generi') }}">Genere</a>
@@ -22,7 +22,7 @@
     {% endif %}
 
     <div class="form-card">
-        <h3>{{ 'Modifica abbonato "' ~ iniziale.nome ~ '"' if in_modifica else 'Nuovo abbonato' }}</h3>
+        <h3>{{ 'Modifica posti riservati "' ~ iniziale.nome ~ '"' if in_modifica else 'Nuovi posti riservati' }}</h3>
         <form method="POST" action="{{ url_for('admin_abbonati_save') }}" id="formAbbonato">
             {% if in_modifica %}<input type="hidden" name="gruppo_id" value="{{ iniziale.gruppo_id }}">{% endif %}
 
@@ -87,7 +87,7 @@
                 <button type="button" id="btnDeseleziona" class="btn btn-sm btn-secondary" style="margin-top:8px;">Deseleziona tutti</button>
             </div>
 
-            <button type="submit" class="btn btn-primary">{{ 'Salva Modifiche' if in_modifica else 'Salva abbonato' }}</button>
+            <button type="submit" class="btn btn-primary">{{ 'Salva Modifiche' if in_modifica else 'Salva posti riservati' }}</button>
             {% if in_modifica %}
             <a href="{{ url_for('admin_abbonati') }}" class="btn btn-secondary">Annulla</a>
             {% endif %}
@@ -95,7 +95,7 @@
     </div>
 
     <div class="prenotazioni-list">
-        <h3>Abbonati inseriti ({{ gruppi|length }})</h3>
+        <h3>Posti riservati inseriti ({{ gruppi|length }})</h3>
 
         <form method="GET" action="{{ url_for('admin_abbonati') }}" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
             <input type="text" name="q" value="{{ filtri.q }}" placeholder="Cerca per nome..." class="form-control" style="width:200px;">
@@ -127,7 +127,7 @@
         <table class="table">
             <thead>
                 <tr>
-                    <th>Abbonato</th>
+                    <th>Nome</th>
                     <th>Categoria</th>
                     <th>Stagione</th>
                     <th>Genere / Sala</th>
@@ -156,7 +156,7 @@
                         <form method="POST" action="{{ url_for('admin_abbonati_toggle', riga_id=g.riga_id) }}" style="display:inline;">
                             <button type="submit" class="btn btn-sm btn-secondary">{{ 'Riattiva' if g.stato == 'Sospeso' else 'Sospendi' }}</button>
                         </form>
-                        <form method="POST" action="{{ url_for('admin_abbonati_delete', riga_id=g.riga_id) }}" style="display:inline;" onsubmit='return confirm({{ ("Eliminare l'abbonato \"" ~ g.nome ~ "\" e i suoi " ~ (g.posti|length) ~ " posti? Le prenotazioni già caricate sugli eventi non vengono toccate.")|tojson }});'>
+                        <form method="POST" action="{{ url_for('admin_abbonati_delete', riga_id=g.riga_id) }}" style="display:inline;" onsubmit='return confirm({{ ("Eliminare i posti riservati di \"" ~ g.nome ~ "\" (" ~ (g.posti|length) ~ " posti)? Le prenotazioni già caricate sugli eventi non vengono toccate.")|tojson }});'>
                             <button type="submit" class="btn btn-sm btn-danger">Elimina</button>
                         </form>
                     </td>
@@ -165,7 +165,7 @@
             </tbody>
         </table>
         {% else %}
-        <p>Nessun abbonato trovato.</p>
+        <p>Nessun posto riservato trovato.</p>
         {% endif %}
     </div>
 
@@ -340,7 +340,7 @@
             return;
         }
         infoMappa.textContent = 'Caricamento della mappa...';
-        var url = '/api/abbonati/mappa?sala_id=' + sala + '&genere_id=' + genere + '&gestore_id=' + gestore +
+        var url = '/api/posti-riservati/mappa?sala_id=' + sala + '&genere_id=' + genere + '&gestore_id=' + gestore +
                   (perm ? '' : '&stagione_id=' + stagione) + (INIZ.gruppo_id ? '&escludi=' + INIZ.gruppo_id : '');
         var mia = ++richiesta;
         fetch(url)

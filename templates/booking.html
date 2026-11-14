@@ -495,8 +495,9 @@ function renderSeats(posti) {
             }
 
             const rip = IS_ADMIN && p.ripetitiva_id ? p.ripetitiva_id : '';
+            const colore = p.categoria_colore || '';
 
-            html += `<div class="seat ${cls}${rip ? ' rip' : ''}" data-id="${p.id}" data-stato="${p.stato}" data-canc="${cancellabile}" data-clic="${cliccabile}" data-pren="${p.prenotazione_id || ''}" data-edit="${modificabile}" data-rip="${rip}" data-nome="${escapeHtml(p.nome_prenotazione || '')}">
+            html += `<div class="seat ${cls}${rip ? ' rip' : ''}" data-id="${p.id}" data-stato="${p.stato}" data-canc="${cancellabile}" data-clic="${cliccabile}" data-pren="${p.prenotazione_id || ''}" data-edit="${modificabile}" data-rip="${rip}" data-bg="${colore}" data-nome="${escapeHtml(p.nome_prenotazione || '')}"${colore ? ` style="background:${colore};border-color:${colore};"` : ''}>
                 <div>${p.fila}${p.colonna}</div>
                 ${label}
             </div>`;
@@ -534,7 +535,7 @@ function toggleSeat(el) {
             selectedToDelete = selectedToDelete.filter(s => s !== id);
             el.classList.remove('selezionato-canc');
             if (stato === 'riservato' || stato === 'abbonato' || stato === 'prenotato') {
-                el.style.background = stato === 'riservato' ? '#e67e22' : (stato === 'abbonato' ? '#8b5cf6' : '#3498db');
+                el.style.background = el.dataset.bg || (stato === 'riservato' ? '#e67e22' : (stato === 'abbonato' ? '#8b5cf6' : '#3498db'));
                 el.style.color = 'white';
             }
         } else {
@@ -621,18 +622,20 @@ function confermaCancella() {
     if (selectedToDelete.length === 0) return;
 
     const container = document.getElementById('seats-container');
-    let riservati = 0, prenotati = 0;
+    let riservati = 0, prenotati = 0, ripetibili = 0;
     selectedToDelete.forEach(id => {
         const el = container.querySelector(`[data-id="${id}"]`);
         if (el) {
             if (el.dataset.stato === 'riservato') riservati++;
             else if (el.dataset.stato === 'prenotato') prenotati++;
+            if (el.dataset.rip) ripetibili++;
         }
     });
 
     let msg = `Sei sicuro di voler cancellare ${selectedToDelete.length} posto/i?`;
     if (riservati > 0 && prenotati > 0) msg += `\n(${prenotati} prenotati, ${riservati} riservati)`;
     else if (riservati > 0) msg += `\n(${riservati} riservati)`;
+    if (ripetibili > 0) msg += `\n\n${ripetibili} ${ripetibili === 1 ? 'posto è' : 'posti sono'} contrassegnat${ripetibili === 1 ? 'o' : 'i'} ↻ (posti riservati ripetibili): ${ripetibili === 1 ? 'viene liberato' : 'vengono liberati'} solo per questo evento e ${ripetibili === 1 ? 'resta fisso' : 'restano fissi'} per gli altri eventi.`;
 
     if (!confirm(msg)) return;
 
@@ -706,7 +709,7 @@ function eseguiAzione() {
     .catch(() => { nascondiInvio(); alert('Errore di rete'); loadSeats(); });
 }
 
-/* ---- Prenotazioni ripetibili (Gestione Abbonati) ---- */
+/* ---- Prenotazioni ripetibili (Gestione Posti Riservati) ---- */
 function riempiSel(sel, elementi, testoVuoto, etichetta) {
     sel.innerHTML = '';
     var v = document.createElement('option');
@@ -744,7 +747,7 @@ function preparaRip(p, stato) {
     riempiSel(stag, RIP.stagioni, '-- Seleziona --', function (s) { return s.nome + ' (' + s.periodo + ')'; });
     if (RIP.stagioni.length === 1) stag.value = String(RIP.stagioni[0].id);
     if (cats.length === 0) {
-        msg.textContent = 'Nessuna categoria attiva' + (stato ? ' con posto «' + stato + '»' : '') + ': creala da Categorie Abbonati.';
+        msg.textContent = 'Nessuna categoria attiva' + (stato ? ' con posto «' + stato + '»' : '') + ': creala da Categorie Posti Riservati.';
     }
     aggiornaRip(p);
 }

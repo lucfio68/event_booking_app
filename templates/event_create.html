@@ -130,6 +130,14 @@
             <input type="number" name="durata" min="15" value="120" required class="form-control">
         </div>
         
+        <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px; font-weight:600;">
+                <input type="checkbox" name="carica_posti_riservati" id="caricaPostiRiservati" checked style="width:auto;">
+                Carica i posti riservati
+            </label>
+            <small class="text-muted">Assegna in automatico a questo evento i posti riservati ripetibili (abbonati, fedelissimi, vip...) dello stesso gestore, genere e sala, la cui stagione comprende la data. Serve che l'evento abbia un Gestore e un Genere.</small>
+        </div>
+
         <button type="submit" class="btn btn-primary btn-block" id="submitBtn">Crea Evento</button>
     </form>
 </div>

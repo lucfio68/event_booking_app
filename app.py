@@ -715,7 +715,8 @@ def booking_page(event_id):
 def api_seats(event_id):
     evento = db.session.get(Evento, event_id)
     posti = Posto.query.options(
-        joinedload(Posto.prenotazione).joinedload(Prenotazione.utente)
+        joinedload(Posto.prenotazione).joinedload(Prenotazione.utente),
+        joinedload(Posto.prenotazione).joinedload(Prenotazione.categoria)
     ).filter_by(evento_id=event_id).order_by(Posto.fila, Posto.colonna).all()
 
     corridoio_colonne = []
@@ -750,6 +751,9 @@ def api_seats(event_id):
             item['prenotazione_id'] = p.prenotazione.id
             item['nome_prenotazione'] = p.prenotazione.nome_prenotazione or p.prenotazione.utente.nome_cognome
             item['utente_nome'] = p.prenotazione.utente.nome_cognome
+            if p.prenotazione.categoria:
+                item['categoria'] = p.prenotazione.categoria.nome
+                item['categoria_colore'] = p.prenotazione.categoria.colore
             if current_user.is_admin():
                 item['utente'] = p.prenotazione.utente.nome_cognome
                 item['ripetitiva_id'] = p.ripetitiva_id
@@ -819,7 +823,7 @@ def api_book():
 
 
 # ------------------------------------------------------------------------------
-# GESTIONE ABBONATI - Fase 3: prenotazioni ripetibili dalla pagina di prenotazione
+# GESTIONE POSTI RISERVATI - Fase 3: prenotazioni ripetibili dalla pagina di prenotazione
 # ------------------------------------------------------------------------------
 
 def _info_ripetibile_evento(evento):
@@ -971,7 +975,7 @@ def _riserva_o_abbona(tipo):
                 evento, categoria, stagione_id, [(p, nome_prenotazione) for p in posti])
             if conflitti:
                 db.session.rollback()
-                return jsonify({'error': "Alcuni posti sono già assegnati ad altri abbonati fissi per questa stagione, "
+                return jsonify({'error': "Alcuni posti sono già assegnati ad altri posti riservati per questa stagione, "
                                          "genere e sala: " + ', '.join(sorted(conflitti))}), 409
 
         db.session.commit()
@@ -1045,7 +1049,7 @@ def api_rendi_ripetibili():
         create, ricollegate, conflitti = _crea_ripetitive_per_posti(evento, categoria, stagione_id, voci)
         if conflitti:
             db.session.rollback()
-            return jsonify({'error': "Alcuni posti sono già assegnati ad altri abbonati fissi per questa stagione, "
+            return jsonify({'error': "Alcuni posti sono già assegnati ad altri posti riservati per questa stagione, "
                                      "genere e sala: " + ', '.join(sorted(conflitti))}), 409
         for pren in prenotazioni.values():
             pren.categoria_id = categoria.id
@@ -1055,6 +1059,156 @@ def api_rendi_ripetibili():
         db.session.rollback()
         app.logger.error(f'Errore rendi-ripetibili: {e}')
         return jsonify({'error': 'Errore interno'}), 500
+
+
+# ------------------------------------------------------------------------------
+# POSTI RISERVATI - Fase 4: caricamento automatico sugli eventi
+# ------------------------------------------------------------------------------
+
+def _applica_ripetitive(evento):
+    """Carica sull'evento i posti riservati ripetibili che rientrano: stesso gestore, genere e sala,
+    data dell'evento dentro la stagione (o categoria permanente, dalla data di assegnazione in poi),
+    nessuna esclusione per questo evento. Non fa commit: lo fa il chiamante.
+    Si puo' richiamare piu' volte sullo stesso evento: i posti gia' caricati vengono saltati."""
+    esito = {'applicabile': True, 'motivo': None, 'caricati': 0, 'gia_presenti': 0, 'esclusi': 0,
+             'persone': 0, 'non_applicati': []}
+    if not evento.gestore_id or not evento.genere_evento_id:
+        esito['applicabile'] = False
+        esito['motivo'] = "L'evento non ha un Gestore e un Genere: nessun posto riservato caricato."
+        return esito
+
+    righe = PrenotazioneRipetitiva.query.options(
+        joinedload(PrenotazioneRipetitiva.categoria), joinedload(PrenotazioneRipetitiva.stagione)
+    ).filter(
+        PrenotazioneRipetitiva.gestore_id == evento.gestore_id,
+        PrenotazioneRipetitiva.genere_evento_id == evento.genere_evento_id,
+        PrenotazioneRipetitiva.sala_id == evento.sala_id,
+        PrenotazioneRipetitiva.ripetibile.is_(True)
+    ).all()
+
+    candidate = []
+    for r in righe:
+        if not r.categoria.attiva:
+            continue
+        if r.stagione_id is not None:
+            if not (r.stagione.data_inizio <= evento.data_evento <= r.stagione.data_fine):
+                continue
+        elif r.data_creazione and r.data_creazione.date() > evento.data_evento:
+            continue   # categoria permanente: vale dalla data di assegnazione in poi
+        candidate.append(r)
+    if not candidate:
+        return esito
+
+    # priorita' piu' alta per prima: in caso di conflitto sullo stesso posto vince lei
+    candidate.sort(key=lambda r: (-r.categoria.priorita, r.id))
+    esclusi = {e.ripetitiva_id for e in EsclusioneRipetitiva.query.filter_by(evento_id=evento.id).all()}
+    posti = {(p.fila, p.colonna): p for p in
+             Posto.query.filter_by(evento_id=evento.id).with_for_update().all()}
+
+    # prenotazioni gia' presenti sull'evento per (persona, categoria): i nuovi posti si aggiungono ad esse
+    prenotazioni = {}
+    for p in Prenotazione.query.filter(Prenotazione.evento_id == evento.id,
+                                       Prenotazione.categoria_id.isnot(None)).all():
+        prenotazioni[(_normalizza_persona(p.nome_prenotazione), p.categoria_id)] = p
+
+    assegnati_ora, persone = {}, set()
+    for r in candidate:
+        codice = f"{r.fila}{r.colonna}"
+        if r.id in esclusi:
+            esito['esclusi'] += 1
+            continue
+        posto = posti.get((r.fila, r.colonna))
+        if posto is None:
+            esito['non_applicati'].append({'posto': codice, 'nome': r.nome_prenotazione,
+                                           'motivo': 'posto inesistente nel layout di questo evento'})
+            continue
+        if posto.ripetitiva_id == r.id:
+            esito['gia_presenti'] += 1
+            continue
+        if (r.fila, r.colonna) in assegnati_ora:
+            esito['non_applicati'].append({'posto': codice, 'nome': r.nome_prenotazione,
+                                           'motivo': f"già assegnato a {assegnati_ora[(r.fila, r.colonna)].nome_prenotazione} (priorità maggiore)"})
+            continue
+        if posto.stato != 'libero':
+            occupante = posto.prenotazione.nome_prenotazione if posto.prenotazione else None
+            esito['non_applicati'].append({'posto': codice, 'nome': r.nome_prenotazione,
+                                           'motivo': 'posto già occupato' + (f" da {occupante}" if occupante else '')})
+            continue
+
+        chiave_pren = (r.persona_chiave, r.categoria_id)
+        pren = prenotazioni.get(chiave_pren)
+        if pren is None:
+            pren = Prenotazione(
+                evento_id=evento.id, utente_id=current_user.id, nome_prenotazione=r.nome_prenotazione,
+                stato='abbonata' if r.categoria.stato_posto == 'abbonato' else 'riservata',
+                categoria_id=r.categoria_id
+            )
+            db.session.add(pren)
+            db.session.flush()
+            prenotazioni[chiave_pren] = pren
+        posto.stato = r.categoria.stato_posto
+        posto.prenotazione_id = pren.id
+        posto.ripetitiva_id = r.id
+        assegnati_ora[(r.fila, r.colonna)] = r
+        persone.add(chiave_pren)
+        esito['caricati'] += 1
+
+    esito['persone'] = len(persone)
+    return esito
+
+
+def _applica_ripetitive_sicura(evento):
+    """Come _applica_ripetitive, ma dentro un savepoint: un errore qui non deve far fallire la creazione dell'evento."""
+    try:
+        with db.session.begin_nested():
+            return _applica_ripetitive(evento)
+    except Exception as e:
+        app.logger.error(f"Errore nel caricamento dei posti riservati sull'evento {evento.id}: {e}")
+        return {'applicabile': True, 'errore': str(e), 'caricati': 0, 'gia_presenti': 0, 'esclusi': 0,
+                'persone': 0, 'non_applicati': []}
+
+
+def _messaggio_posti_riservati(esito):
+    """Testo e categoria del messaggio per l'admin dopo un caricamento. Ritorna (testo, categoria_flash)."""
+    if not esito.get('applicabile', True):
+        return esito['motivo'], 'warning'
+    if esito.get('errore'):
+        return "Posti riservati non caricati: si è verificato un errore (l'evento è stato creato comunque).", 'danger'
+    non_applicati = esito.get('non_applicati', [])
+    if not (esito['caricati'] or esito['gia_presenti'] or esito['esclusi'] or non_applicati):
+        return 'Nessun posto riservato da caricare per questo evento.', 'info'
+    parti = [f"{esito['caricati']} caricati" + (f" ({esito['persone']} prenotazioni)" if esito['caricati'] else '')]
+    if esito['gia_presenti']:
+        parti.append(f"{esito['gia_presenti']} già presenti")
+    if esito['esclusi']:
+        parti.append(f"{esito['esclusi']} esclusi per questo evento")
+    testo = 'Posti riservati: ' + ', '.join(parti) + '.'
+    if non_applicati:
+        dettagli = '; '.join(f"{n['posto']} ({n['nome']}): {n['motivo']}" for n in non_applicati[:8])
+        testo += f" Non applicati {len(non_applicati)}: {dettagli}" + (' …' if len(non_applicati) > 8 else '.')
+    return testo, ('warning' if non_applicati else 'success')
+
+
+@app.route('/admin/event/<int:event_id>/carica-posti-riservati', methods=['POST'])
+@login_required
+def admin_event_carica_posti_riservati(event_id):
+    """Pulsante «Carica posti riservati» in gestione evento."""
+    if not current_user.is_admin():
+        abort(403)
+    evento = db.session.get(Evento, event_id)
+    if not evento:
+        abort(404)
+    try:
+        esito = _applica_ripetitive(evento)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Errore carica-posti-riservati evento {event_id}: {e}")
+        flash('Errore durante il caricamento dei posti riservati.', 'danger')
+        return redirect(url_for('admin_event_view', event_id=event_id))
+    testo, categoria = _messaggio_posti_riservati(esito)
+    flash(testo, categoria)
+    return redirect(url_for('admin_event_view', event_id=event_id))
 
 
 @app.route('/api/delete-seats', methods=['POST'])
@@ -1113,8 +1267,17 @@ def api_delete_seats():
             prenotazioni_coinvolte[pid]['posti'].append(p)
 
         posti_str_parts = []
+        posti_esclusi = 0
         for p in posti:
             posti_str_parts.append(f"{p.fila}{p.colonna}")
+            if p.ripetitiva_id and current_user.is_admin():
+                # posto riservato ripetibile liberato per QUESTO evento: non verra' ricaricato dal prossimo caricamento
+                gia = EsclusioneRipetitiva.query.filter_by(ripetitiva_id=p.ripetitiva_id, evento_id=p.evento_id).first()
+                if not gia:
+                    db.session.add(EsclusioneRipetitiva(ripetitiva_id=p.ripetitiva_id, evento_id=p.evento_id,
+                                                        creato_da=current_user.id))
+                p.ripetitiva_id = None
+                posti_esclusi += 1
             p.stato = 'libero'
             p.prenotazione_id = None
 
@@ -1213,7 +1376,8 @@ Questa e' una notifica automatica.
         'success': True,
         'posti_eliminati': len(posti),
         'prenotazioni_eliminate': len(prenotazioni_da_eliminare),
-        'posti': posti_str_parts
+        'posti': posti_str_parts,
+        'posti_esclusi': posti_esclusi
     })
 
 
@@ -1619,8 +1783,17 @@ def create_event():
                 numero += 1
 
         db.session.add_all(posti_bulk)
+        db.session.flush()
+
+        esito_riservati = None
+        if request.form.get('carica_posti_riservati'):
+            esito_riservati = _applica_ripetitive_sicura(evento)
+
         db.session.commit()
         flash('Evento creato con successo!', 'success')
+        if esito_riservati is not None:
+            testo, categoria = _messaggio_posti_riservati(esito_riservati)
+            flash(testo, categoria)
         return redirect(url_for('calendar_view'))
 
     sale = Sala.query.order_by(Sala.nome).all()
@@ -2045,8 +2218,8 @@ def admin_gestori_delete(gestore_id):
     ripetitive_collegate = PrenotazioneRipetitiva.query.filter_by(gestore_id=gestore_id).count()
     if ripetitive_collegate > 0:
         flash(
-            f"Impossibile eliminare '{gestore.ragione_sociale}': ha {ripetitive_collegate} posti di abbonati collegati. "
-            f"Eliminali prima da Gestione Abbonati.",
+            f"Impossibile eliminare '{gestore.ragione_sociale}': ha {ripetitive_collegate} posti riservati collegati. "
+            f"Eliminali prima da Gestione Posti Riservati.",
             'danger'
         )
         return redirect(url_for('admin_gestori'))
@@ -2185,8 +2358,8 @@ def admin_stagioni_delete(stagione_id):
     ripetitive_collegate = PrenotazioneRipetitiva.query.filter_by(stagione_id=stagione_id).count()
     if ripetitive_collegate > 0:
         flash(
-            f"Impossibile eliminare '{stagione.nome_stagione}': ha {ripetitive_collegate} posti di abbonati collegati. "
-            f"Eliminali prima da Gestione Abbonati.",
+            f"Impossibile eliminare '{stagione.nome_stagione}': ha {ripetitive_collegate} posti riservati collegati. "
+            f"Eliminali prima da Gestione Posti Riservati.",
             'danger'
         )
         return redirect(url_for('admin_stagioni'))
@@ -2199,7 +2372,7 @@ def admin_stagioni_delete(stagione_id):
 
 
 # ------------------------------------------------------------------------------
-# GESTIONE ABBONATI - Fase 2: categorie e prenotazioni ripetitive
+# GESTIONE POSTI RISERVATI - Fase 2: categorie e prenotazioni ripetitive
 # ------------------------------------------------------------------------------
 
 CATEGORIE_RIPETITIVE_INIZIALI = [
@@ -2317,8 +2490,8 @@ def _leggi_categoria_da_form(categoria_esistente=None):
 
     if categoria_esistente and categoria_esistente.durata != durata:
         if PrenotazioneRipetitiva.query.filter_by(categoria_id=categoria_esistente.id).count() > 0:
-            return None, ("Non puoi cambiare la durata di una categoria già usata da abbonati: "
-                          "crea una nuova categoria oppure elimina prima quegli abbonati.")
+            return None, ("Non puoi cambiare la durata di una categoria già usata da posti riservati: "
+                          "crea una nuova categoria oppure elimina prima quei posti riservati.")
 
     return {
         'nome': nome, 'colore': colore.lower(), 'stato_posto': stato_posto, 'durata': durata,
@@ -2327,7 +2500,7 @@ def _leggi_categoria_da_form(categoria_esistente=None):
     }, None
 
 
-@app.route('/admin/categorie-abbonati')
+@app.route('/admin/categorie-posti-riservati')
 @login_required
 def admin_categorie_abbonati():
     if not current_user.is_admin():
@@ -2347,7 +2520,7 @@ def admin_categorie_abbonati():
     )
 
 
-@app.route('/admin/categorie-abbonati/add', methods=['POST'])
+@app.route('/admin/categorie-posti-riservati/add', methods=['POST'])
 @login_required
 def admin_categorie_abbonati_add():
     if not current_user.is_admin():
@@ -2362,7 +2535,7 @@ def admin_categorie_abbonati_add():
     return redirect(url_for('admin_categorie_abbonati'))
 
 
-@app.route('/admin/categorie-abbonati/<int:categoria_id>/edit', methods=['POST'])
+@app.route('/admin/categorie-posti-riservati/<int:categoria_id>/edit', methods=['POST'])
 @login_required
 def admin_categorie_abbonati_edit(categoria_id):
     if not current_user.is_admin():
@@ -2381,7 +2554,7 @@ def admin_categorie_abbonati_edit(categoria_id):
     return redirect(url_for('admin_categorie_abbonati'))
 
 
-@app.route('/admin/categorie-abbonati/<int:categoria_id>/delete', methods=['POST'])
+@app.route('/admin/categorie-posti-riservati/<int:categoria_id>/delete', methods=['POST'])
 @login_required
 def admin_categorie_abbonati_delete(categoria_id):
     if not current_user.is_admin():
@@ -2391,7 +2564,7 @@ def admin_categorie_abbonati_delete(categoria_id):
         abort(404)
     usi = PrenotazioneRipetitiva.query.filter_by(categoria_id=categoria_id).count()
     if usi > 0:
-        flash(f"Impossibile eliminare '{categoria.nome}': è usata da {usi} posti di abbonati. "
+        flash(f"Impossibile eliminare '{categoria.nome}': è usata da {usi} posti riservati. "
               f"Puoi disattivarla dalla modifica.", 'danger')
         return redirect(url_for('admin_categorie_abbonati'))
     nome = categoria.nome
@@ -2404,7 +2577,7 @@ def admin_categorie_abbonati_delete(categoria_id):
 # ---- Abbonati (prenotazioni ripetitive) ----
 
 def _leggi_ripetitiva_da_form(categoria_corrente_id=None):
-    """Valida il modulo Gestione Abbonati. Ritorna (dati, errore)."""
+    """Valida il modulo Gestione Posti Riservati. Ritorna (dati, errore)."""
     nome = (request.form.get('nome_prenotazione') or '').strip()
     gestore_id = request.form.get('gestore_id', type=int)
     categoria_id = request.form.get('categoria_id', type=int)
@@ -2469,7 +2642,7 @@ def _leggi_ripetitiva_da_form(categoria_corrente_id=None):
     }, None
 
 
-@app.route('/admin/abbonati')
+@app.route('/admin/posti-riservati')
 @login_required
 def admin_abbonati():
     if not current_user.is_admin():
@@ -2559,10 +2732,10 @@ def admin_abbonati():
     )
 
 
-@app.route('/api/abbonati/mappa')
+@app.route('/api/posti-riservati/mappa')
 @login_required
 def api_abbonati_mappa():
-    """Layout di riferimento e posti gia' presi da altre ripetitive, per la mappa di Gestione Abbonati."""
+    """Layout di riferimento e posti gia' presi da altre ripetitive, per la mappa di Gestione Posti Riservati."""
     if not current_user.is_admin():
         return jsonify({'error': 'Accesso negato'}), 403
 
@@ -2603,7 +2776,7 @@ def api_abbonati_mappa():
     })
 
 
-@app.route('/admin/abbonati/save', methods=['POST'])
+@app.route('/admin/posti-riservati/save', methods=['POST'])
 @login_required
 def admin_abbonati_save():
     if not current_user.is_admin():
@@ -2633,7 +2806,7 @@ def admin_abbonati_save():
     conflitti = [r for r in altre if (r.fila, r.colonna) in posti_scelti and r.id not in id_gruppo]
     if conflitti:
         elenco = ', '.join(f"{r.fila}{r.colonna} ({r.nome_prenotazione})" for r in sorted(conflitti, key=lambda r: (r.fila, r.colonna)))
-        flash(f"Alcuni posti sono già assegnati ad altri abbonati per questa stagione, genere e sala: {elenco}.", 'danger')
+        flash(f"Alcuni posti sono già assegnati ad altri posti riservati per questa stagione, genere e sala: {elenco}.", 'danger')
         return redirect(torna)
 
     try:
@@ -2661,14 +2834,14 @@ def admin_abbonati_save():
         return redirect(torna)
 
     n = len(dati['posti'])
-    flash(f"Abbonato '{dati['nome']}' {'aggiornato' if riga_rif else 'creato'}: {n} {'posto' if n == 1 else 'posti'}.", 'success')
+    flash(f"Posti riservati di '{dati['nome']}' {'aggiornati' if riga_rif else 'creati'}: {n} {'posto' if n == 1 else 'posti'}.", 'success')
     return redirect(url_for('admin_abbonati', gestore_id=dati['gestore_id']))
 
 
-@app.route('/admin/abbonati/<int:riga_id>/toggle', methods=['POST'])
+@app.route('/admin/posti-riservati/<int:riga_id>/toggle', methods=['POST'])
 @login_required
 def admin_abbonati_toggle(riga_id):
-    """Sospende (o riattiva) tutti i posti dell'abbonato senza cancellarli."""
+    """Sospende (o riattiva) tutti i posti riservati della persona senza cancellarli."""
     if not current_user.is_admin():
         abort(403)
     riga = db.session.get(PrenotazioneRipetitiva, riga_id)
@@ -2679,11 +2852,11 @@ def admin_abbonati_toggle(riga_id):
     for r in righe:
         r.ripetibile = nuovo_valore
     db.session.commit()
-    flash(f"Abbonato '{riga.nome_prenotazione}' {'riattivato' if nuovo_valore else 'sospeso'}.", 'success')
+    flash(f"Posti riservati di '{riga.nome_prenotazione}' {'riattivati' if nuovo_valore else 'sospesi'}.", 'success')
     return redirect(request.referrer or url_for('admin_abbonati'))
 
 
-@app.route('/admin/abbonati/<int:riga_id>/delete', methods=['POST'])
+@app.route('/admin/posti-riservati/<int:riga_id>/delete', methods=['POST'])
 @login_required
 def admin_abbonati_delete(riga_id):
     if not current_user.is_admin():
@@ -2695,7 +2868,7 @@ def admin_abbonati_delete(riga_id):
     righe = _righe_gruppo(riga)
     _elimina_ripetitive(righe)
     db.session.commit()
-    flash(f"Abbonato '{nome}' eliminato ({len(righe)} posti). Le prenotazioni già caricate sugli eventi non vengono toccate.", 'success')
+    flash(f"Posti riservati di '{nome}' eliminati ({len(righe)} posti). Le prenotazioni già caricate sugli eventi non vengono toccate.", 'success')
     return redirect(request.referrer or url_for('admin_abbonati'))
 
 
@@ -2828,7 +3001,7 @@ def admin_generi_delete(genere_id):
     ripetitive_collegate = PrenotazioneRipetitiva.query.filter_by(genere_evento_id=genere_id).count()
     if ripetitive_collegate > 0:
         flash(
-            f"Impossibile eliminare '{genere.nome}': ha {ripetitive_collegate} posti di abbonati collegati.",
+            f"Impossibile eliminare '{genere.nome}': ha {ripetitive_collegate} posti riservati collegati.",
             'danger'
         )
         return redirect(url_for('admin_generi'))
@@ -3224,8 +3397,8 @@ def admin_sale_delete(sala_id):
     ripetitive_collegate = PrenotazioneRipetitiva.query.filter_by(sala_id=sala_id).count()
     if ripetitive_collegate > 0:
         flash(
-            f"Impossibile eliminare '{sala.nome}': ha {ripetitive_collegate} posti di abbonati collegati. "
-            f"Eliminali prima da Gestione Abbonati.",
+            f"Impossibile eliminare '{sala.nome}': ha {ripetitive_collegate} posti riservati collegati. "
+            f"Eliminali prima da Gestione Posti Riservati.",
             'danger'
         )
         return redirect(url_for('admin_sale'))
@@ -3611,7 +3784,7 @@ def _crea_posti_griglia(evento):
     db.session.add_all(posti_bulk)
 
 
-def _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, google_event_id, gestore_id=None, genere_evento_id_scelto=None):
+def _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, google_event_id, gestore_id=None, genere_evento_id_scelto=None, carica_riservati=True, esiti=None):
     layout = _layout_default_per_sala(sala_id)
     if not layout:
         return None, 'nessun layout di default configurato per questa sala'
@@ -3639,6 +3812,11 @@ def _crea_evento_da_import(sala_id, nome, descrizione, data_obj, ora_obj, durata
     db.session.add(evento)
     db.session.flush()
     _crea_posti_griglia(evento)
+    if carica_riservati:
+        db.session.flush()
+        esito = _applica_ripetitive_sicura(evento)
+        if esiti is not None:
+            esiti.append((nome, evento.data_evento, esito))
     return evento, None
 
 
@@ -3814,6 +3992,9 @@ def admin_google_import_applica():
     gids = request.form.getlist('gid')
 
     contatori = {'importati': 0, 'aggiornati': 0, 'sostituiti': 0, 'mantenuti_entrambi': 0, 'ignorati': 0, 'errori': 0}
+    # posti riservati: per ora caricati sempre (la spunta in pagina non c'e' ancora: campo assente = attivo)
+    carica_riservati_import = request.form.get('carica_posti_riservati', 'on') == 'on'
+    esiti_import = []
 
     for gid in gids:
         azione = request.form.get(f'azione__{gid}', 'ignora')
@@ -3867,7 +4048,8 @@ def admin_google_import_applica():
                 db.session.flush()
             _, errore = _crea_evento_da_import(
                 sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, gid,
-                gestore_id=gestore_id_import, genere_evento_id_scelto=genere_scelto
+                gestore_id=gestore_id_import, genere_evento_id_scelto=genere_scelto,
+                carica_riservati=carica_riservati_import, esiti=esiti_import
             )
             if errore:
                 contatori['errori'] += 1
@@ -3878,7 +4060,8 @@ def admin_google_import_applica():
         elif azione == 'importa_nuovo':
             _, errore = _crea_evento_da_import(
                 sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, gid,
-                gestore_id=gestore_id_import, genere_evento_id_scelto=genere_scelto
+                gestore_id=gestore_id_import, genere_evento_id_scelto=genere_scelto,
+                carica_riservati=carica_riservati_import, esiti=esiti_import
             )
             if errore:
                 contatori['errori'] += 1
@@ -3889,7 +4072,8 @@ def admin_google_import_applica():
         elif azione == 'mantieni_entrambi':
             _, errore = _crea_evento_da_import(
                 sala_id, nome, descrizione, data_obj, ora_obj, durata, calendar_id, None,
-                gestore_id=gestore_id_import, genere_evento_id_scelto=genere_scelto
+                gestore_id=gestore_id_import, genere_evento_id_scelto=genere_scelto,
+                carica_riservati=carica_riservati_import, esiti=esiti_import
             )
             if errore:
                 contatori['errori'] += 1
@@ -3916,6 +4100,20 @@ def admin_google_import_applica():
         f"ignorati: {contatori['ignorati']}" + (f", errori: {contatori['errori']}" if contatori['errori'] else "")
     )
     flash(riepilogo, 'success' if not contatori['errori'] else 'warning')
+
+    if esiti_import:
+        caricati = sum(e['caricati'] for _, _, e in esiti_import)
+        senza_gestore_genere = [n for n, _, e in esiti_import if not e.get('applicabile', True)]
+        problemi = [(n, d, e) for n, d, e in esiti_import if e.get('non_applicati') or e.get('errore')]
+        testo = f"Posti riservati caricati sui nuovi eventi: {caricati}."
+        if senza_gestore_genere:
+            testo += f" {len(senza_gestore_genere)} eventi senza gestore o genere: nessun caricamento."
+        if problemi:
+            testo += (" Da controllare: " + '; '.join(
+                f"{n} del {d.strftime('%d/%m/%Y')} ({len(e.get('non_applicati', []))} non applicati)"
+                if not e.get('errore') else f"{n} del {d.strftime('%d/%m/%Y')} (errore)"
+                for n, d, e in problemi[:6]) + ('…' if len(problemi) > 6 else '.'))
+        flash(testo, 'warning' if (problemi or senza_gestore_genere) else 'success')
     return redirect(url_for('admin_google_import', calendar_id=calendar_id, giorni=giorni, gestore_id=gestore_id_import))
 
 

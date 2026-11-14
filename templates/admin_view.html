@@ -42,6 +42,10 @@
             <div style="display:flex; gap:10px; flex-wrap:wrap;">
                 <a href="{{ url_for('admin_evento_layout', event_id=evento.id) }}" class="btn btn-secondary">🔧 Modifica Layout</a>
                 <a href="{{ url_for('stampa_evento_pdf', event_id=evento.id) }}" target="_blank" class="btn btn-secondary">🖨️ Stampa PDF</a>
+                <form method="POST" action="{{ url_for('admin_event_carica_posti_riservati', event_id=evento.id) }}" style="display:inline;"
+                      onsubmit="return confirm('Caricare su questo evento i posti riservati ripetibili che rientrano (stesso gestore, genere, sala e stagione)? I posti già occupati non vengono toccati.');">
+                    <button type="submit" class="btn btn-secondary" title="Carica i posti riservati ripetibili che rientrano in questo evento">📥 Carica posti riservati</button>
+                </form>
                 <button id="btnDeleteEvent" data-event-id="{{ evento.id }}" data-event-name="{{ evento.nome }}" class="btn btn-danger" style="background:#dc2626;">
                     🗑️ Elimina Evento
                 </button>
@@ -218,6 +222,11 @@
                     var classes = ['seat', seat.stato];
                     if (seat.nome_prenotazione) classes.push('admin-name');
                     seatDiv.className = classes.join(' ');
+                    if (seat.categoria_colore) {
+                        seatDiv.style.background = seat.categoria_colore;
+                        seatDiv.style.borderColor = seat.categoria_colore;
+                        seatDiv.style.color = '#fff';
+                    }
                     seatDiv.setAttribute('data-id', seat.id);
                     seatDiv.setAttribute('data-fila', seat.fila);
                     seatDiv.setAttribute('data-colonna', seat.colonna);

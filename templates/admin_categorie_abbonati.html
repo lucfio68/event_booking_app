@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Categorie Abbonati{% endblock %}
+{% block title %}Categorie Posti Riservati{% endblock %}
 {% block content %}
 <div class="admin-container">
-    <h2>🏷️ Categorie Abbonati</h2>
-    <p class="text-muted">Le categorie (Abbonato, Fedelissimo, Vip, ...) stabiliscono come si comportano i posti fissi: per quanto tempo valgono, come compaiono in mappa e quale ha la precedenza se due categorie vogliono lo stesso posto.</p>
+    <h2>🏷️ Categorie Posti Riservati</h2>
+    <p class="text-muted">Le categorie (Abbonato, Fedelissimo, Vip, ...) stabiliscono come si comportano i posti riservati ripetibili: per quanto tempo valgono, come compaiono in mappa e quale ha la precedenza se due categorie vogliono lo stesso posto.</p>
 
     <div class="form-card">
         <h3>{{ 'Modifica Categoria "' ~ categoria_da_modificare.nome ~ '"' if categoria_da_modificare else 'Nuova Categoria' }}</h3>
@@ -48,7 +48,7 @@
                 <div class="form-group col-6">
                     <label>&nbsp;</label>
                     <label style="font-weight:normal; display:block; margin-top:8px;">
-                        <input type="checkbox" name="attiva" {% if not categoria_da_modificare or categoria_da_modificare.attiva %}checked{% endif %}> Categoria attiva (utilizzabile per nuovi abbonati)
+                        <input type="checkbox" name="attiva" {% if not categoria_da_modificare or categoria_da_modificare.attiva %}checked{% endif %}> Categoria attiva (utilizzabile per nuovi posti riservati)
                     </label>
                 </div>
             </div>
@@ -115,7 +115,7 @@
         {% endif %}
     </div>
 
-    <a href="{{ url_for('admin_abbonati') }}" class="btn btn-outline">Vai a Gestione Abbonati</a>
+    <a href="{{ url_for('admin_abbonati') }}" class="btn btn-outline">Vai a Gestione Posti Riservati</a>
     <a href="{{ url_for('calendar_view') }}" class="btn btn-outline">Torna al Calendario</a>
 </div>
 {% endblock %}
